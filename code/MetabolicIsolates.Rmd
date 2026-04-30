@@ -1,0 +1,966 @@
+---
+title: "MetabolicIsolates"
+author: "Emmi Mueller"
+date: "2026-04-26"
+output: pdf_document
+---
+
+```{r setup, echo=FALSE}
+rm(list=ls())
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.align = "center",
+  message = FALSE,
+  warning = FALSE,
+  tidy.opts = list(width.cutoff = 60),
+  tidy = TRUE)
+```
+
+```{r}
+getwd()
+
+library(ggplot2)
+library(scales)
+library(actuar)
+library(deSolve)
+library(tidyverse)
+library(bbmle)
+library(here)
+library(truncnorm)
+library(cowplot)
+library(VGAM)
+library(emmeans)
+library(multcompView)
+
+here()
+
+source("./MetDist_functions.R")
+```
+
+```{r figure_setup}
+my.cols <- RColorBrewer::brewer.pal(n = 4, name = "Greys")[3:4]
+
+# Set theme for figures in the paper
+theme_set(theme_classic() + 
+  theme(axis.title = element_text(size = 16),
+        axis.title.x = element_text(margin = margin(t = 15, b = 15)),
+        axis.title.y = element_text(margin = margin(l = 15, r = 15)),
+        axis.text = element_text(size = 13),
+        axis.text.x = element_text(margin = margin(t = 5)),
+        axis.text.y = element_text(margin = margin(r = 5)),
+        #axis.line.x = element_line(linewidth = 1),
+        #axis.line.y = element_line(linewidth = 1),
+        axis.line.x = element_blank(),
+        axis.line.y = element_blank(),
+        axis.ticks.x = element_line(linewidth = 1),
+        axis.ticks.y = element_line(linewidth = 1),
+        axis.ticks.length = unit(.1, "in"),
+        panel.border = element_rect(color = "black", fill = NA, linewidth = 1.5),
+        legend.text = element_text(size = 14),
+        strip.text = element_text(size = 14),
+        strip.background = element_blank()
+        ))
+
+cols <- c("#c8ad35","#1e4858","#ba4365", "#32bfab", "#8daab7", "#c790ae","#8A9A5B")
+
+set.seed(47405)
+```
+
+```{r}
+#Processing of data
+#Each sample should have the name it will be called and the fcs file name
+
+MD_Isolates <- c("IUB2501" = "IUB2501.fcs", "IUB2506" = "IUB2506.fcs", "IUB2507" = "IUB2507.fcs", "IUB2508" = "IUB2508.fcs", "IUB2509" = "IUB2509.fcs", "IUB2510" = "IUB2510.fcs", "IUB2512" = "IUB2512.fcs", "IUB2513" = "IUB2513.fcs", "IUB2516" = "IUB2516.fcs", "IUB2518" = "IUB2518.fcs", "IUB2519" = "IUB2519.fcs", "IUB2523" = "IUB2523.fcs", "IUB2524" = "IUB2524.fcs", "IUB2528" = "IUB2528.fcs", "IUB2531" = "IUB2531.fcs", "IUB2536" = "IUB2536.fcs", "KBS1023" = "KBS1023.fcs", "KBS1027" = "KBS1027.fcs", "KBS1029" = "KBS1029.fcs", "KBS1032" = "KBS1032.fcs", "KBS1033" = "KBS1033.fcs", "KBS1048" = "KBS1048.fcs", "KBS1052" = "KBS1052.fcs")
+
+for(key in names(MD_Isolates)){
+#  assign(key, process(here("data", "Isolates", MD_Isolates[key]), "B530-H", TRUE))
+    assign(key, process(here("data", "Isolates", MD_Isolates[key]), "B530-H", FALSE))
+}
+
+#List of R lists with all samples
+met_all <- list(IUB2501, IUB2506, IUB2507, IUB2508, IUB2509, IUB2510, IUB2512, IUB2513, IUB2516, IUB2518, IUB2519, IUB2523, IUB2524, IUB2528, IUB2531, IUB2536, KBS1023, KBS1027, KBS1029, KBS1032, KBS1033, KBS1048, KBS1052)
+
+#List of all sample names
+samples_all <- c("IUB2501", "IUB2506", "IUB2507", "IUB2508", "IUB2509", "IUB2510", "IUB2512", "IUB2513", "IUB2516", "IUB2518", "IUB2519", "IUB2523", "IUB2524", "IUB2528", "IUB2531", "IUB2536", "KBS1023", "KBS1027", "KBS1029", "KBS1032", "KBS1033", "KBS1048", "KBS1052")
+
+met_samples <- read.csv(here("data", "Isolates", "MD_Isolates.csv"))
+
+
+Ncells <- 0
+for(met in met_all){
+  Ncells <- Ncells + length(met[,"RSG_ab"])
+}
+
+Ncells 
+```
+
+# FIGURE S4. QQ-plots for Lognormal, Gamma, Gaussian, Pareto
+
+#Lnorm - all data
+```{r}
+metn <- 1
+ln_fits <- data.frame("Sample" = NA, "RSG_ab" = NA, "qlnorm" = NA)
+ln_param <- data.frame("Sample" = NA, "meanlog" = NA, "sdlog" = NA, "AIC_ln" = NA,"BIC_ln" = NA, "lL_ln" = NA, "R2_ln" = NA)
+
+#met1 <- IUB2501
+for(met1 in met_all){
+  
+  met_sub <- met1
+  nll_ln <- function(meanlog, sdlog) {
+    -sum(dlnorm((met_sub[,"RSG_ab"]), meanlog = meanlog, sdlog = sdlog, log = TRUE))
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_ln,
+    start = list(meanlog = 1, sdlog = median(met_sub[,"RSG_ab"])),  # Reasonable starting values
+    method = "Nelder-Mead"
+  )
+  print(samples_all[metn])
+  print(summary(mle_fit))
+  
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  
+  qlnorm <- qlnorm(e_cdf, meanlog = coef(mle_fit)[1], sdlog = coef(mle_fit)[2])
+  
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ plnorm(met_sub[,"RSG_ab"], coef(mle_fit)[1], coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])), met_sub[,"RSG_ab"], qlnorm)
+  ln_param <- rbind(ln_param, data.frame("Sample" = samples_all[metn], "meanlog" = coef(mle_fit)[1], "sdlog" = coef(mle_fit)[2], "AIC_ln" = AIC(mle_fit),"BIC_ln" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_ln" = logLik(mle_fit), "R2_ln" = R2))
+  colnames(fit) <- c("Sample", "RSG_ab", "qlnorm")
+  ln_fits <- rbind(ln_fits, fit)
+  
+  metn <- metn + 1
+}
+
+ln_fits <- ln_fits[-1,]
+ln_fits <- subset(ln_fits, ln_fits$qlnorm != "Inf")
+ln_param <- ln_param[-1,]
+
+CI <- data.frame("x_ci" = seq(0, 9, 0.5), "y_ci" = seq(0, 9, 0.5))
+
+
+met_samples <- cbind(met_samples, ln_param[,c("meanlog", "sdlog", "AIC_ln", "BIC_ln", "lL_ln", "R2_ln")])
+ln_fits$RSG_ab <- as.numeric(ln_fits$RSG_ab)
+ln_fits$qlnorm <- as.numeric(ln_fits$qlnorm)
+
+top20 <- c()
+for(met1 in met_all){
+  quantile_cutoff <- quantile(met1$RSG_ab, 0.8)
+  total_activity <- sum(met1$RSG_ab)
+  top20_activity <- sum(subset(met1, met1$RSG_ab > quantile_cutoff)$RSG_ab)
+  top20_fraction <- top20_activity/total_activity
+  top20 <- c(top20, top20_fraction)
+}
+
+met_samples$top20 <- top20
+
+#Takes a while to run (= 0.96)
+# ln_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(ln_fits, 5000)
+#   ln_boots <- c(ln_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qlnorm, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# ln_boot_r2 <- round(mean(ln_boots),2)
+
+CI <- data.frame("x_ci" = seq(-5, 8, 0.5), "y_ci" = seq(-5, 8, 0.5))
+
+Lnorm_fit_plot <- ln_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qlnorm, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[3])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", size = 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Lognormal")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)==0.96", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(1,8), ylim = c(-4, 8))
+
+Lnorm_fit_plot
+```
+
+## Gamma
+```{r}
+metn <- 1
+g_fits <- data.frame("Sample" = NA, "RSG_ab" = NA, "qgamma" = NA)
+g_param <- data.frame("Sample" = NA, "shape" = NA, "scale" = NA, "AIC_g" = NA, "BIC_g" = NA, "lL_g" = NA, "R2_g" = NA)
+for(met1 in met_all){
+  met_sub <- met1
+  nll_g <- function(shape, scale) {
+    -sum(dgamma((met_sub[,"RSG_ab"]), shape = shape, scale = scale, log = TRUE))
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_g,
+    start = list(shape = 1, scale = 10),
+    lower = c(0.001, 0.001),
+    upper = c(Inf, Inf),
+    method = "L-BFGS-B"
+  )
+  print(samples_all[metn])
+  print(summary(mle_fit))
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  qgamma <- qgamma(e_cdf, shape = coef(mle_fit)[1], scale = coef(mle_fit)[2])
+  
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ pgamma(met_sub[,"RSG_ab"], shape = coef(mle_fit)[1], scale = coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])), met_sub[,"RSG_ab"], qgamma)
+  colnames(fit) <- c("Sample", "RSG_ab", "qgamma")
+  g_param <- rbind(g_param, data.frame("Sample" = samples_all[metn], "shape" = coef(mle_fit)[1], "scale" = coef(mle_fit)[2], "AIC_g" = AIC(mle_fit), "BIC_g" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_g" = logLik(mle_fit), "R2_g" = R2))
+  g_fits <- rbind(g_fits, fit)
+  
+  metn <- metn + 1
+}
+
+rm(Gamma)
+  
+
+g_fits <- g_fits[-1,]
+g_fits <- subset(g_fits, g_fits$qgamma != "Inf")
+g_param <- g_param[-1,]
+
+met_samples <- cbind(met_samples, g_param[,c("shape", "scale", "AIC_g", "BIC_g", "lL_g", "R2_g")])
+
+g_fits$RSG_ab <- as.numeric(g_fits$RSG_ab)
+g_fits$qgamma <- as.numeric(g_fits$qgamma)
+
+
+#Takes a while to run (= 0.92)
+# g_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(g_fits, 5000)
+#   g_boots <- c(g_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qgamma, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# g_boot_r2 <- round(mean(g_boots),2)
+
+
+CI <- data.frame("x_ci" = seq(-5, 8, 0.5), "y_ci" = seq(-5, 8, 0.5))
+
+Gamma_fit_plot <- g_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qgamma, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[1])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", linewidth= 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Gamma")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)==0.92", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(1,8), ylim = c(-4, 8))+
+  theme(legend.position = "none")
+
+Gamma_fit_plot
+```
+
+
+#Pareto - all data
+```{r}
+metn <- 1
+p_fits <- data.frame("Sample" = NA, "RSG_ab" = NA, "qpareto" = NA)
+p_param <- data.frame("Sample" = NA, "shape_p" = NA, "scale_p" = NA, "AIC_p" = NA, "BIC_p" = NA, "lL_p" = NA, "R2_p" = NA)
+for(met1 in met_all){
+  
+  met_sub <- met1
+  nll_p <- function(shape, scale) {
+    -sum(actuar::dpareto((met_sub[,"RSG_ab"]), shape = shape, scale = scale, log = TRUE))
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_p,
+    start = list(shape = 1, scale = median(met_sub[,"RSG_ab"])),  # Reasonable starting values
+    lower = c(0.001, 0.001),
+    upper = c(Inf, Inf),
+    method = "L-BFGS-B"
+  )
+  print(samples_all[metn])
+  print(summary(mle_fit))
+  
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  
+  qpareto <- actuar::qpareto(e_cdf, shape = coef(mle_fit)[1], scale = coef(mle_fit)[2])
+  
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ actuar::ppareto(met_sub[,"RSG_ab"], coef(mle_fit)[1], coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])), met_sub[,"RSG_ab"], qpareto)
+  p_param <- rbind(p_param, data.frame("Sample" = samples_all[metn], "shape_p" = coef(mle_fit)[1], "scale_p" = coef(mle_fit)[2], "AIC_p" = AIC(mle_fit), "BIC_p" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_p" = logLik(mle_fit), "R2_p" = R2))
+  colnames(fit) <- c("Sample", "RSG_ab", "qpareto")
+  p_fits <- rbind(p_fits, fit)
+  
+  metn <- metn + 1
+}
+
+p_fits <- p_fits[-1,]
+p_fits <- subset(p_fits, p_fits$qpareto != "Inf")
+p_param <- p_param[-1,]
+met_samples <- cbind(met_samples, p_param[,c("shape_p", "scale_p", "AIC_p", "BIC_p", "lL_p", "R2_p")])
+
+p_fits$RSG_ab <- as.numeric(p_fits$RSG_ab)
+p_fits$qpareto <- as.numeric(p_fits$qpareto)
+
+rownames(met_samples) <- NULL
+
+#Takes a while to run (= 0.72)
+# p_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(p_fits, 5000)
+#   p_boots <- c(p_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qpareto, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# p_boot_r2 <- round(mean(p_boots),2)
+
+CI <- data.frame("x_ci" = seq(-5, 8, 0.5), "y_ci" = seq(-5, 8, 0.5))
+
+Pareto_fit_plot <- p_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qpareto, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[4])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", size = 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Pareto")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)=='0.72'", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(1,8), ylim = c(-4, 8))+
+  theme(legend.position = "none")
+
+Pareto_fit_plot
+```
+
+```{r}
+plot <- plot_grid(
+  Lnorm_fit_plot + theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  Gamma_fit_plot+ theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  Pareto_fit_plot+ theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  nrow = 1,
+  align = 'vh',
+  rel_widths = c(1,1,1)
+)
+plot
+
+x.axis <- plot_grid(
+  NULL,
+  get_plot_component(Lnorm_fit_plot, 'xlab-b'),
+  nrow = 1,
+  rel_widths = c(0.2,1)
+)
+
+qq_plots <- ggdraw(plot_grid(plot_grid(get_plot_component(Lnorm_fit_plot, 'ylab-l'), plot, nrow = 1, rel_widths = c(0.1,1)),x.axis, ncol = 1, rel_heights = c(1,0.2)))+
+    theme(plot.background = element_rect(fill= "white", color = NA))+
+    draw_plot_label(label = c("(c)", "(d)", "(e)"), size = 20, x=c(0.08, 0.38, 0.69), y = c(1, 1, 1))
+
+qq_plots
+```
+
+```{r}
+KSs <- data.frame("Sample" = NA, "ks_g" = NA, "ks_p" = NA, "ks_ln" = NA)
+
+rownames(met_samples) <- NULL
+
+set.seed(47405)
+
+metn <- 1
+for(met in met_all){
+ ks_g <- ks.test(met[,"RSG_ab"], "pgamma", shape = g_param[metn, "shape"], scale = g_param[metn, "scale"])$statistic
+ ks_ln <- ks.test(met[,"RSG_ab"], "plnorm", meanlog = ln_param[metn, "meanlog"], sdlog = ln_param[metn, "sdlog"])$statistic
+  ks_p <- ks.test(met[,"RSG_ab"], actuar::ppareto, shape = p_param[metn, "shape_p"], scale = p_param[metn, "scale_p"])$statistic
+  KSs <- rbind(KSs, c("Sample" = samples_all[metn], "ks_g" = ks_g, "ks_p" = ks_p, "ks_ln" = ks_ln))
+  metn <- metn + 1
+}
+
+KSs <- KSs[-1,]
+KSs <- gather(KSs, key = "dist", value = "KS", ks_g:ks_ln)
+KSs$KS <- as.numeric(KSs$KS)
+KSs$dist <- factor(KSs$dist, levels = c("ks_ln", "ks_g", "ks_p"))
+
+
+fit <- aov(KS ~ dist, data = KSs)
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist), adjust = "Tukey")
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+KSs$dist <- factor(KSs$dist, levels = c("ks_ln", "ks_g", "ks_p"))
+KS_cld <- data.frame("x" = c(1,2,3), "y" = rep(0.5, 3), "label" = c("b", "b", "a"))
+
+KS_plot_all <- ggplot()+
+  geom_boxplot(data = KSs, aes(x = dist, y = KS, color = dist))+
+  ylim(c(0, 0.5))+
+  ylab("K-S statistic")+
+  geom_text(data = KS_cld, aes(x = x, y = y, label = label))+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Pareto"))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[4]), labels = c("Lognormal", "Gamma", "Pareto"))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5,color = "black"), axis.ticks.x =  element_blank(), axis.title.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), legend.position = "bottom")
+
+KS_plot_all
+```
+
+```{r}
+R2s <- met_samples[,c("Sample", "R2_g", "R2_ln","R2_p")]
+R2s <- gather(R2s, key = "dist", value = R2, R2_g:R2_p)
+
+R2s$dist <- factor(R2s$dist, levels = c("R2_ln", "R2_g", "R2_p"))
+
+fit <- aov(R2 ~ dist, data = R2s)
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist))
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+R2s$dist <- factor(R2s$dist, levels = c("R2_ln", "R2_g", "R2_p"))
+R2_cld <- data.frame("x" = c(1,2,3), "y" = rep(1.05, 3), "label" = c("a", "a", "b"))
+
+
+R2_plot_all <- ggplot()+
+  geom_boxplot(data = R2s, aes(x = dist, y = R2, color = dist))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[4]), labels = c("Lognormal", "Gamma", "Pareto"))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 90,hjust = 1, vjust = 0.5,  color = "black"), axis.ticks.x =  element_blank(), axis.title.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), legend.position = "bottom")+
+  ylab(expression(italic('r'^2)))+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Pareto"))+
+  ylim(c(0.5, 1.05))+
+  geom_text(data = R2_cld, aes(x = x, y = y, label = label))
+
+R2_plot_all
+```
+
+```{r}
+R2_KS <- ggdraw()+
+  draw_plot(R2_plot_all + guides(color = "none"), x = 0, y = 0, width = 0.5, height = 1)+
+  draw_plot(KS_plot_all + guides(color = "none"), x = 0.5, y = 0, width = 0.5, height = 1)+
+  theme(plot.background = element_rect(fill= "white", color = NA))+
+  draw_plot_label(label = c("(a)", "(b)"), size = 20, x=c(0, 0.5), y = c(1, 1))
+
+R2_KS
+
+ggdraw(plot_grid(R2_KS, NULL, plot_grid(NULL, qq_plots, NULL, nrow = 1, rel_widths = c(0.05, 0.9, 0.05)), ncol = 1, rel_heights = c(0.5, 0.01, 0.5)))+
+    theme(plot.background = element_rect(fill= "white", color = NA))
+
+ggsave("../output/FigS4_Isolatefits.png", width = 11, height = 9)
+```
+
+## Load packages and functions
+
+```{r}
+need <- function(pkgs) pkgs[!sapply(pkgs, requireNamespace, quietly = TRUE)]
+
+bioc_pkgs <- c("Biostrings", "msa")
+cran_pkgs <- c(
+  "png", "dplyr", "grid", "psych", "seqinr", "ape", "phylobase",
+  "RColorBrewer", "phytools", "geiger", "picante", "lme4",
+  "lmerTest", "adephylo", "bios2mds"
+)
+
+# BiocManager if needed
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+# Install missing Bioconductor packages
+to_install_bioc <- need(bioc_pkgs)
+if (length(to_install_bioc))
+  BiocManager::install(to_install_bioc, ask = FALSE, update = TRUE)
+
+# Install missing CRAN packages
+to_install_cran <- need(cran_pkgs)
+if (length(to_install_cran))
+  install.packages(to_install_cran)
+
+# Load everything (quietly)
+all_pkgs <- c(cran_pkgs, bioc_pkgs)
+invisible(lapply(all_pkgs, function(p)
+  suppressPackageStartupMessages(library(p, character.only = TRUE))
+))
+
+# Your functions
+source("~/GitHub/MetabolicDistribution/code/Phylo4D.JTL.R")
+# SEM
+sem <- function(x) {
+  sd(x, na.rm = TRUE) / sqrt(sum(!is.na(x)))
+}
+
+# Confidence Hulls
+add.hull <- function(model = "", pred.frame = ""){
+  CI.U <- predict(model, interval = "c", newdata=pred.frame)[, "upr"]
+  CI.L <- predict(model, interval = "c", newdata=pred.frame)[, "lwr"]
+  pred.frame2 <- unlist(pred.frame)
+  X.Vec <- c(pred.frame2, tail(pred.frame2, 1), rev(pred.frame2),
+               head(pred.frame2, 1))
+  Y.Vec <- c(CI.U, tail(CI.L, 1), rev(CI.L), head(CI.U,1))
+  polygon(X.Vec, Y.Vec, col = "gray90", border = NA)
+}
+```
+
+## Preparing sequence reads
+
+```{bash, results = 'hide', eval = FALSE}
+# Data wrangling:
+# step 1. For UL strains, we sequenced forward and reverse direction for long coverage
+# step 2. We used two fasta files (forward and reverse) with same id names
+# step 3. We reversed the reverse reads as follows:
+# seqkit seq -t dna -r -p IUB_reverse.fasta > IUB_reverse.rc.fasta
+# step 4. We then merged sequences
+# step 5. We created a new fasta file with merged UL reads and previous KBS reads
+
+# Sequence alignment:
+# step 1: brew install mafft
+# step 2: run at terminal: mafft --globalpair --maxiterate 1000 IUB_KBS.fasta > aligned.16S.highacc.fasta
+# High-accuracy mode (useful for rRNA fragments / small datasets)
+# --globalpair --maxiterate 1000 uses an accurate global alignment strategy
+
+# Maximum likelihood tree using RAxML-NG (v1.2) from Terminal
+# GTR + Gamma model: full ML + nonparametric bootstrap run, support mapping
+# ~/desktop % seqkit stats aligned.16S.highacc.fasta                
+# file                       format  type  num_seqs  sum_len  min_len  avg_len  max_len
+# aligned.16S.highacc.fasta  FASTA   DNA         24   36,096    1,504    1,504    1,504
+# confirm no weird characters: grep -v "^>" aligned.16S.fasta | tr -d '\n' | grep -o '[^ACGTN\-]' | sort -u
+# Trim poorly aligned seqs:
+# trimal -in aligned.16S.highacc.fasta \
+       #-out aligned.16S.highacc.fasta.trimmed.fasta \
+       #-automated1
+# Run RAxML: 
+# Thorough ML search (multiple starting trees)
+# Non-parametric bootstrap (100–500 replicates)
+# Support mapping onto best ML tree
+
+#raxml-ng \
+  #--msa aligned.16S.highacc.fasta.trimmed.fasta \
+  #--model GTR+G \ # GTR substitution model + Gamma rate heterogeneity
+  #--prefix 16S_GTRG \ # Output file prefix
+  #--threads 4 \
+  #--seed 12345 \
+  #--all \ # ML search + bootstrap + support mapping
+  #--bs-trees 200 \ # 200 bootstrap replicates
+  #--tree pars{10},rand{10} # 20 starting trees (very safe for small datasets)
+```
+
+## Visualize sequence alignment
+
+```{r}
+# Read aligned FASTA
+getwd()
+aln_path <- "../data/Isolates/16S_sequence_tree/aligned.16S.highacc.fasta" # or "analysis/aligned.trim.afa" if you trimmed
+dna <- read.dna(aln_path, format = "fasta")  # DNAbin matrix (rows = taxa, cols = sites)
+
+# Identify base pair region of 16S rRNA gene to visualize
+start <- 50
+end   <- 1200
+end   <- min(end, ncol(dna))  # clamp to alignment length
+if (start > ncol(dna)) stop("Start position is beyond alignment length.")
+window <- dna[, start:end, drop = FALSE]
+
+# Visualize the window
+par(mar = c(5, 5, 2, 1))
+image.DNAbin(window, cex.lab = 0.5)
+
+# existing KBS sequences are about 400 bp shorter than UL sequences
+```
+
+# View maximum likelihood tree
+
+```{r}
+# 1) Read the supported ML tree (single phylo with support values)
+tree <- read.tree("../data/Isolates/16S_sequence_tree/16S_GTRG.raxml.support")
+stopifnot(inherits(tree, "phylo"))
+
+# 2) Load map and prepare 'phytip'
+# mapping = ln parameters with taxonomy+metadata
+map <- read.csv("../data/Isolates/16S_sequence_tree/isolate.mapping.3.csv", stringsAsFactors = FALSE)
+stopifnot(all(c("ID","strain") %in% names(map)))
+map <- map %>%
+  mutate(
+    ID = as.character(ID),
+    strain = as.character(strain),
+    genus = as.character(genus),
+    phytip = trimws(paste(genus, strain))
+  )
+
+# 3) Sanity checks (short)
+missing_in_map <- setdiff(tree$tip.label, map$strain)   # compare to map$strain (IDs in tree are strains)
+dup_strain     <- map$strain[duplicated(map$strain)]
+
+if (length(missing_in_map) > 0) {
+  warning("Tips with no mapping (will be left as-is): ", paste(head(missing_in_map, 20), collapse = ", "))
+}
+if (length(dup_strain) > 0) {
+  warning("Duplicate entries in map$strain (ambiguous mapping): ", paste(unique(dup_strain), collapse = ", "))
+}
+
+# 4) Tiny relabeler (strain -> phytip). Works for phylo or multiPhylo; here tree is phylo
+ids  <- map$strain
+labs <- map$phytip
+i <- match(tree$tip.label, ids)
+tree$tip.label[!is.na(i)] <- labs[i[!is.na(i)]]
+cat("Relabeled:", sum(!is.na(i)), "tips\n")
+
+# 5) Root the tree on Methanosarcina (use exact matched label after relabeling)
+out <- grep("Methanosarc", tree$tip.label, value = TRUE)
+if (length(out) != 1) stop("Outgroup 'Methanosarcina' not found uniquely; got: ", paste(out, collapse = ", "))
+tree_rooted <- root(tree, outgroup = out, resolve.root = TRUE)
+
+# (optionally) save rooted tree
+write.tree(tree_rooted, file = "../data/Isolates/16S_sequence_tree/16S_GTRG.raxml.support.rooted.nwk")
+cat("Wrote rooted tree to data/Isolates/16S_sequence_tree/16S_GTRG.raxml.support.rooted.nwk\n")
+
+# 6) Quick plots: 
+# 6a) simple vanilla check (rooted, shows outgroup)
+par(mfrow = c(1,1), mar = c(1,1,2,1) + 0.1)
+plot(tree_rooted, cex = 0.6, main = paste("Rooted on", out))
+if (!is.null(tree_rooted$node.label)) nodelabels(tree_rooted$node.label, cex = 0.5, frame = "n")
+
+# 6b) confirmation plot: drop the outgroup from the drawn figure for a cleaner view
+tree_for_plot <- drop.tip(tree_rooted, out)
+tree_for_plot <- ladderize(tree_for_plot, right = FALSE)
+par(mar = c(1,1,2,1) + 0.1)
+plot.phylo(tree_for_plot, type = "phylogram", direction = "right",
+           show.tip.label = TRUE, use.edge.length = FALSE, cex = 0.7, label.offset = 0.3,
+           main = "Maximum Likelihood (outgroup removed for display)")
+add.scale.bar()
+if (!is.null(tree_for_plot$node.label)) {
+  nl <- as.numeric(tree_for_plot$node.label)
+  # show only reasonably-supported (>=50) node labels to avoid clutter
+  nodes_to_show <- which(!is.na(nl) & nl >= 50) + length(tree_for_plot$tip.label)
+  if (length(nodes_to_show) > 0) nodelabels(text = nl[nl >= 50], node = nodes_to_show, frame = "n", cex = 0.6)
+}
+```
+
+# Summarize metabolic inequality across strains
+
+```{r}
+# Basic summary
+summary(map$sdlog)
+#  Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+# 0.3559  0.4195  0.4942  0.5328  0.5601  1.1129       1 
+
+# Range
+range(map$sdlog, na.rm = TRUE)
+# 0.3559286 - 1.1128792
+
+# Mean and SD
+mean(map$sdlog, na.rm = TRUE)
+sd(map$sdlog, na.rm = TRUE)
+sem(map$sdlog)
+# 0.53 +/- 0.0391 => mean +/- SEM 
+
+# Quantiles (useful for legend cutoffs)
+quantile(map$sdlog, probs = c(0, 0.05, 0.25, 0.5, 0.75, 0.95, 1), na.rm = TRUE)
+
+# Histogram
+hist(map$sdlog, breaks = 20, col = "gray80", main = "Distribution of sdlog", xlab = "sdlog")
+
+# Kernel density
+
+png(filename="../output/Isolates_16S/kernel.png", width = 2000, 
+    height = 1200, res = 200, bg = "white")
+# margins: bottom, left, top, right (right large to avoid label clipping)
+
+par(
+  mar = c(5, 6, 3, 5),
+  mgp = c(3.8, 1.3, 0)
+)
+
+x <- map$sdlog[!is.na(map$sdlog)]
+d <- density(x)
+
+
+plot(
+  d,
+  main = "",
+  xlab = expression(paste("Skewness of activity (", sigma, ")")),
+  ylab = "Density",
+  lwd  = 2.5,
+  col  = "steelblue",
+  cex.lab = 2, 
+  las  = 2,
+  xaxt = "n",
+  yaxt = "n",
+  tck  = 0,
+  ylim = c(0, 4)   # ensure y ticks 0–4 are visible
+)
+
+# filled density
+polygon(d, col = adjustcolor("steelblue", alpha.f = 0.3), border = NA)
+
+# --- compute tick locations ---
+x_at <- axTicks(1)  # default "nice" x ticks
+y_at <- 0:4         # y ticks: 0,1,2,3,4
+
+box(lwd = 2)
+
+text(
+  x      = 0.49,
+  y      = 2.01,
+  labels = c(expression(paste(tilde(italic(x)), " = 0.49"))),
+  adj    = c(0.5, 1),
+  cex    = 1.2
+)
+
+segments(x0 = 0.49, y0 = 0, x1 = 0.49, y1 = 1.8, lty = "longdash", col = "steelblue", lwd = 3)
+segments(x0 = 0.49, y0 = 2.1, x1 = 0.49, y1 = 3.4, lty = "longdash", col = "steelblue", lwd = 3)
+
+# --- bottom and left axes (with labels) ---
+axis(1, at = x_at, cex.axis = 1.5, lwd = 2, lwd.ticks = 2.5)
+axis(2, at = y_at, las = 2, cex.axis = 1.5, lwd = 2, lwd.ticks = 2.5)
+
+axis(3, at = x_at, labels = FALSE, lwd = 2, lwd.ticks = 2.5)
+axis(4, at = y_at, labels = FALSE, lwd = 2, lwd.ticks = 2.5)
+
+# Close Plot Device
+dev.off()
+graphics.off()
+
+# Show Plot
+img <- readPNG("../output/Isolates_16S/kernel.png")
+
+grid.raster(img)
+
+# The distribution of estimated log-scale dispersions is right-skewed, with most samples showing moderate heterogeneity and a small number exhibiting substantially higher variability.
+```
+
+
+# Map effect sizes onto tree
+
+```{r}
+# -----------------------
+# Inputs / outputs
+# -----------------------
+tree_file <- "../data/Isolates/16S_sequence_tree/16S_GTRG.raxml.support"
+map_file  <- "../data/Isolates/16S_sequence_tree/isolate.mapping.3.csv"
+
+# -----------------------
+# 1) Read tree & mapping
+# -----------------------
+tree <- read.tree(tree_file)
+
+map <- read.csv(map_file, stringsAsFactors = FALSE) %>%
+  mutate(
+    strain = as.character(strain),
+    genus  = as.character(genus),
+    phytip = trimws(paste(genus, strain)),
+    sdlog  = as.numeric(sdlog)
+  )
+
+# -----------------------
+# 2) Relabel tips (strain -> phytip)
+# -----------------------
+strain2phy <- setNames(map$phytip, map$strain)
+hit <- tree$tip.label %in% names(strain2phy)
+tree$tip.label[hit] <- strain2phy[tree$tip.label[hit]]
+if (anyDuplicated(tree$tip.label)) tree$tip.label <- make.unique(tree$tip.label)
+
+# -----------------------
+# 3) Root on Methanosarcina
+# -----------------------
+outgroup_label <- grep("Methanosarc", tree$tip.label, value = TRUE)
+stopifnot(length(outgroup_label) == 1)
+tree <- root(tree, outgroup = outgroup_label, resolve.root = TRUE)
+
+# -----------------------
+# 4) Drop outgroup + Bacillus IUB2513
+# -----------------------
+bacillus_label <- map$phytip[map$strain == "IUB2513"]
+to_drop <- intersect(c(outgroup_label, bacillus_label), tree$tip.label)
+t_display <- if (length(to_drop) > 0) drop.tip(tree, to_drop) else tree
+t_display <- ladderize(t_display, right = FALSE)
+t_display$node.label <- NULL
+
+# -----------------------
+# 5) Build sdlog data aligned to tree
+# -----------------------
+sd_vec <- setNames(map$sdlog, map$phytip)
+sd_on_tips <- as.numeric(sd_vec[t_display$tip.label])
+
+dat <- data.frame(
+  sdlog = sd_on_tips,
+  row.names = t_display$tip.label,
+  check.names = FALSE
+)
+
+# phylo4d object (needed for table.phylo4d tree drawing)
+x <- phylo4d(t_display, tip.data = dat)
+
+# -----------------------
+# 6) Palette + FIXED legend range (0.3 -> 1.0)
+# -----------------------
+BuRd <- c("#0571B0","#92C5DE","gray92","#F7F7F7","#F4A582","#CA0020")
+pal <- colorRampPalette(BuRd)(25)
+
+legend_min <- 0.3
+legend_max <- 1.0
+
+# Map sd_on_tips to this fixed legend range (clamped inside)
+breaks_fixed <- seq(legend_min, legend_max, length.out = length(pal) + 1)
+idx_fixed <- findInterval(sd_on_tips, vec = breaks_fixed, all.inside = TRUE)
+assigned_cols <- pal[idx_fixed]
+assigned_cols[is.na(sd_on_tips)] <- "gray85"  # neutral color for any NA
+
+# -----------------------
+# 7) Plot: draw tree (hide built-in symbols) + draw one manual tile column + legend
+# -----------------------
+png(filename="../output/Isolates_16S/trait.map.png", width = 1600, 
+    height = 1200, res = 150, bg = "white")
+
+# margins: bottom, left, top, right (right large to avoid label clipping)
+par(mar = c(3, 4, 0.5, 3))
+
+# Draw tree via table.phylo4d but keep built-in symbol column effectively invisible:
+# (symbol must be a valid arg; we use "colors" but set cex.symbol tiny)
+table.phylo4d(
+  x,
+  treetype        = "phylogram",
+  symbol          = "colors",    # required legal value
+  show.node       = FALSE,
+  cex.label       = 0.8,
+  grid            = FALSE,
+  scale           = TRUE,
+  use.edge.length = FALSE,
+  edge.color      = "black",
+  edge.width      = 1.6,
+  box             = FALSE,
+  col             = pal,         # palette passed but builtin symbols hidden
+  pch             = 15,
+  cex.symbol      = 0.01,        # effectively hide automatic symbol column
+  font            = 1,
+  ratio.tree      = 0.40,
+  cex.legend      = 0.01,        # tiny but non-zero (avoids strwidth error)
+  center          = FALSE,
+  show.var.label  = FALSE
+)
+
+# Grab tip coordinates and overlay exactly one visible column of colored squares
+lp <- get("last_plot.phylo", envir = .PlotPhyloEnv)
+n_tip <- length(t_display$tip.label)
+tip_x <- lp$xx[1:n_tip]
+tip_y <- lp$yy[1:n_tip]
+
+# horizontal offset for manual column (tune 0.02-0.05 to preference)
+usr <- par("usr")
+offset <- 0.03 * diff(usr[1:2])
+
+# draw manual column of squares (one column only)
+points(
+  x = tip_x + offset,
+  y = tip_y,
+  pch = 15,
+  col = assigned_cols,
+  bg  = assigned_cols,
+  cex = 2.2
+)
+
+# ---------- Draw single continuous legend (visible, fixed 0.3->1.0) ----------
+usr <- par("usr")
+legend_x0 <- usr[1] + 0.30 * diff(usr[1:2])      # left in from edge
+legend_y0 <- usr[3] - 0.00 * diff(usr[3:4])      # slightly above bottom
+
+# Make the bar clearly visible
+bar_w <- diff(usr[1:2]) * 0.018
+bar_h <- diff(usr[3:4]) * 0.020
+
+for (i in seq_along(pal)) {
+  rect(
+    xleft   = legend_x0 + (i-1) * bar_w,
+    ybottom = legend_y0,
+    xright  = legend_x0 + i * bar_w,
+    ytop    = legend_y0 + bar_h,
+    col     = pal[i],
+    border  = NA
+  )
+}
+
+# three explicit tick values
+ticks <- c(0.25, 0.50, 1.0)
+
+# positions evenly spanning the color bar
+tick_x <- legend_x0 + c(0, 0.5, 1) * bar_w * (length(pal) - 1)
+
+text(
+  x      = tick_x,
+  y      = legend_y0 - 0.02 * diff(usr[3:4]),
+  labels = c("0.25", "0.63", "1.0"),
+  adj    = c(0.5, 1),
+  cex    = 1
+)
+
+# Close Plot Device
+dev.off()
+graphics.off()
+
+# Show Plot
+img <- readPNG("../output/Isolates_16S/trait.map.png")
+
+grid.raster(img)
+```
+
+## Phylogenetic tests
+
+```{r}
+
+# Load & root tree (your original commands)
+ml.tree <- read.tree("../data/Isolates/16S_sequence_tree/16S_GTRG.raxml.support")
+tree.rooted <- ape::root(ml.tree, outgroup = "Methanosarcina", resolve.root = TRUE)
+
+# Keep only tips present in your data (map$strain)
+tips_to_keep <- intersect(tree.rooted$tip.label, as.character(map$strain))
+tips_to_drop <- setdiff(tree.rooted$tip.label, tips_to_keep)
+if (length(tips_to_drop) > 0) {
+  message("Dropping tips not found in map$strain: ", paste(tips_to_drop, collapse = ", "))
+}
+tree <- drop.tip(tree.rooted, tips_to_drop)
+
+# Create named sdlog vector matched to tree tip labels
+# (use as.character to avoid factor pitfalls)
+sdlog_all <- setNames(as.numeric(map$sdlog), as.character(map$strain))
+sdlog_vec <- sdlog_all[match(tree$tip.label, names(sdlog_all))]
+
+# Sanity: which tips are NA (should include Methanosarcina if it's still present or any other missing)
+na_tips <- tree$tip.label[is.na(sdlog_vec)]
+if (length(na_tips) > 0) {
+  message("Dropping tips with missing sdlog (NA): ", paste(na_tips, collapse = ", "))
+  tree <- drop.tip(tree, na_tips)
+  sdlog_vec <- sdlog_vec[!is.na(sdlog_vec)]
+  # Re-match names to be safe
+  sdlog_vec <- sdlog_vec[match(tree$tip.label, names(sdlog_vec))]
+}
+
+# Final sanity check (will stop if something still wrong)
+stopifnot(length(sdlog_vec) == length(tree$tip.label))
+stopifnot(!any(is.na(sdlog_vec)))
+
+# Run tests
+K_res <- phylosig(tree, sdlog_vec, method = "K", test = TRUE)
+print(K_res)
+#Phylogenetic signal K : 0.4096 
+#P-value (based on 1000 randomizations) : 0.086 
+# Blomberg’s K is low (but weak)
+# Closely related taxa less simila than expected under strict Brownian-motion model
+
+lambda_res <- phylosig(tree, sdlog_vec, method = "lambda", test = TRUE)
+print(lambda_res)
+#Phylogenetic signal lambda : 0.999927 
+#logL(lambda) : 5.56065 
+#LR(lambda=0) : 18.9155 
+#P-value (based on LR test) : 1.36637e-05 
+# Pagel’s lambda for sdlog very close to 1. (0.9999) and highly significant. 
+# Strong phylogenetic dependence in the covariance structure of sdlog
+# Indicating strong phylogenetic structure consistent with Brownian motion.
+```

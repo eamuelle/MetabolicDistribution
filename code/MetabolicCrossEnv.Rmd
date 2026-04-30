@@ -1,0 +1,845 @@
+---
+title: "MetabolicCrossEnv"
+author: "Emmi Mueller"
+date: "2026-04-23"
+output: pdf_document
+---
+
+```{r setup, echo=FALSE}
+rm(list=ls())
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.align = "center",
+  message = FALSE,
+  warning = FALSE,
+  tidy.opts = list(width.cutoff = 60),
+  tidy = TRUE)
+```
+
+```{r}
+getwd()
+
+library(ggplot2)
+library(scales)
+library(actuar)
+library(deSolve)
+library(tidyverse)
+library(bbmle)
+library(here)
+library(truncnorm)
+library(cowplot)
+library(VGAM)
+library(emmeans)
+library(multcompView)
+library(lme4)
+
+here()
+
+source("./MetDist_functions.R")
+```
+
+```{r figure_setup}
+my.cols <- RColorBrewer::brewer.pal(n = 4, name = "Greys")[3:4]
+
+# Set theme for figures in the paper
+theme_set(theme_classic() + 
+  theme(axis.title = element_text(size = 16),
+        axis.title.x = element_text(margin = margin(t = 15, b = 15)),
+        axis.title.y = element_text(margin = margin(l = 15, r = 15)),
+        axis.text = element_text(size = 13),
+        axis.text.x = element_text(margin = margin(t = 5)),
+        axis.text.y = element_text(margin = margin(r = 5)),
+        #axis.line.x = element_line(linewidth = 1),
+        #axis.line.y = element_line(linewidth = 1),
+        axis.line.x = element_blank(),
+        axis.line.y = element_blank(),
+        axis.ticks.x = element_line(linewidth = 1),
+        axis.ticks.y = element_line(linewidth = 1),
+        axis.ticks.length = unit(.1, "in"),
+        panel.border = element_rect(color = "black", fill = NA, linewidth = 1.5),
+        legend.text = element_text(size = 14),
+        strip.text = element_text(size = 14),
+        strip.background = element_blank()
+        ))
+
+cols <- c("#c8ad35","#1e4858","#ba4365", "#32bfab", "#8daab7", "#c790ae","#8A9A5B","#59633B")
+
+set.seed(47405)
+```
+
+```{r}
+Smriga <- read.csv("../data/CrossEnv/Smriga_2014/Smriga_2014_Corrected.csv", header = TRUE)
+
+x <- 2
+while(x < 100){
+  Smriga[x, "SP1_Act"] <- Smriga[x, "SP1"] - Smriga[x-1, "SP1"]
+  Smriga[x, "SP2_Act"] <- Smriga[x, "SP2"] - Smriga[x-1, "SP2"]
+  Smriga[x, "SP3_Act"] <- Smriga[x, "SP3"] - Smriga[x-1, "SP3"]
+  Smriga[x, "SP4_Act"] <- Smriga[x, "SP4"] - Smriga[x-1, "SP4"]
+  Smriga[x, "E1_Act"] <- Smriga[x, "E1"] - Smriga[x-1, "E1"]
+  Smriga[x, "E2_Act"] <- Smriga[x, "E2"] - Smriga[x-1, "E2"]
+  x <- x + 1
+}
+
+for(x in c("SP1", "SP2", "SP3", "SP4", "E1", "E2")){
+  Smriga[1, paste(x, "_Act", sep = "")] <- Smriga[1, x]
+  Smriga[100, paste(x, "_Act", sep = "")] <- 100 - Smriga[100, x]
+  assign(paste("MD_", x, sep = ""), data.frame("RSG_ab" = Smriga[, paste(x, "_Act", sep = "")]))
+}
+```
+
+```{r}
+Nikrad <- read.csv("../data/CrossEnv/Nikrad_2012/Nikrad_2012.csv", header = TRUE)
+
+MD_N_BeauW <- data.frame("Bin" = Nikrad[,"SilverGrain"], "Per_cells" = Nikrad[,"BeauW"])[1:7,]
+MD_N_BeauS <- data.frame("Bin" = Nikrad[,"SilverGrain"], "Per_cells" = Nikrad[,"BeauS"])[1:14,]
+MD_N_ChukW <- data.frame("Bin" = Nikrad[,"SilverGrain"], "Per_cells" = Nikrad[,"ChukW"])[1:10,]
+MD_N_ChukS <- data.frame("Bin" = Nikrad[,"SilverGrain"], "Per_cells" = Nikrad[,"ChukS"])[1:7,]
+```
+
+```{r}
+SH_DC <- read.csv("../data/CrossEnv/Sintes_Herndl_2006/SH_DC.csv", header = TRUE)
+SH_DC_T1 <- read.csv("../data/CrossEnv/Sintes_Herndl_2006/SH_DC_T1.csv", header = TRUE)
+SH_DC_T3 <- read.csv("../data/CrossEnv/Sintes_Herndl_2006/SH_DC_T3.csv", header = TRUE)
+SH_DC_T7 <- read.csv("../data/CrossEnv/Sintes_Herndl_2006/SH_DC_T7.csv", header = TRUE)
+SH_NS_Feb <- read.csv("../data/CrossEnv/Sintes_Herndl_2006/SH_NS_Feb.csv", header = TRUE)
+```
+
+```{r}
+MD_GM_4 <- c("MD_4_D0_A"="D0-A.fcs", "MD_4_D1A_A"="D1A-A.fcs", "MD_4_D1B_A"="D1B-A.fcs", "MD_4_D2A_A"="D2A-A.fcs", "MD_4_D2B_A"="D2B-A.fcs", "MD_4_D3A_A"="D3A-A.fcs", "MD_4_D3B_A"="D3B-A.fcs", "MD_4_D4A_A"="D4A-A.fcs", "MD_4_D4B_A"="D4B-A.fcs","MD_4_D5A_A"="D5A-A.fcs", "MD_4_D5B_A"="D5B-A.fcs", "MD_4_D6A_A"="D6A-A.fcs", "MD_4_D6B_A"="D6B-A.fcs","MD_4_D7A_A"="D7A-A.fcs", "MD_4_D7B_A"="D7B-A.fcs", "MD_4_D7AB_A"="D7AB-A.fcs", "MD_4_D7BB_A"="D7BB-A.fcs")
+
+for(key in names(MD_GM_4)){
+    assign(key, process(here("data", "CrossEnv", "Mueller_2025", "20250203_GM_Set4", MD_GM_4[key]), "B530-H", FALSE))
+}
+
+MD_GM_5 <- c("MD_5_D0_A"="D0-A.fcs", "MD_5_D1A_A"="D1A-A.fcs", "MD_5_D1B_A"="D1B-A.fcs", "MD_5_D2A_A"="D2A-A.fcs", "MD_5_D2B_A"="D2B-A.fcs", "MD_5_D3A_A"="D3A-A.fcs", "MD_5_D3B_A"="D3B-A.fcs", "MD_5_D4A_A"="D4A-A.fcs", "MD_5_D4B_A"="D4B-A.fcs","MD_5_D5A_A"="D5A-A.fcs", "MD_5_D5B_A"="D5B-A.fcs", "MD_5_D6A_A"="D6A-A.fcs", "MD_5_D6B_A"="D6B-A.fcs","MD_5_D7A_A"="D7A-A.fcs", "MD_5_D7B_A"="D7B-A.fcs", "MD_5_D7AB_A"="D7AB-A.fcs", "MD_5_D7BB_A"="D7BB-A.fcs")
+
+for(key in names(MD_GM_5)){
+    assign(key, process(here("data", "CrossEnv", "Mueller_2025", "20250204_GM_Set5", MD_GM_5[key]), "B530-H", FALSE))
+}
+
+MD_GM_6 <- c("MD_6_D0_A"="D0-A.fcs", "MD_6_D1A_A"="D1A-A.fcs", "MD_6_D1B_A"="D1B-A.fcs", "MD_6_D2A_A"="D2A-A.fcs", "MD_6_D2B_A"="D2B-A.fcs", "MD_6_D3A_A"="D3A-A.fcs", "MD_6_D3B_A"="D3B-A.fcs", "MD_6_D4A_A"="D4A-A.fcs", "MD_6_D4B_A"="D4B-A.fcs","MD_6_D5A_A"="D5A-A.fcs", "MD_6_D5B_A"="D5B-A.fcs", "MD_6_D6A_A"="D6A-A.fcs", "MD_6_D6B_A"="D6B-A.fcs","MD_6_D7A_A"="D7A-A.fcs", "MD_6_D7B_A"="D7B-A.fcs", "MD_6_D7AB_A"="D7AB-A.fcs", "MD_6_D7BB_A"="D7BB-A.fcs")
+
+for(key in names(MD_GM_6)){
+    assign(key, process(here("data", "CrossEnv", "Mueller_2025", "20250201_GM_Set6", MD_GM_6[key]), "B530-H", FALSE))
+}
+
+MD_GM_7 <- c("MD_7_D0_A"="D0-A.fcs", "MD_7_D1A_A"="D1A-A.fcs", "MD_7_D1B_A"="D1B-A.fcs", "MD_7_D2A_A"="D2A-A.fcs", "MD_7_D2B_A"="D2B-A.fcs", "MD_7_D3A_A"="D3A-A.fcs", "MD_7_D3B_A"="D3B-A.fcs", "MD_7_D4A_A"="D4A-A.fcs", "MD_7_D4B_A"="D4B-A.fcs","MD_7_D5A_A"="D5A-A.fcs", "MD_7_D5B_A"="D5B-A.fcs", "MD_7_D6A_A"="D6A-A.fcs", "MD_7_D6B_A"="D6B-A.fcs","MD_7_D7A_A"="D7A-A.fcs", "MD_7_D7B_A"="D7B-A.fcs", "MD_7_D7AB_A"="D7AB-A.fcs", "MD_7_D7BB_A"="D7BB-A.fcs")
+
+for(key in names(MD_GM_7)){
+    assign(key, process(here("data", "CrossEnv", "Mueller_2025", "20250131_GM_Set7", MD_GM_7[key]), "B530-H", FALSE))
+}
+
+MD_GM_8 <- c("MD_8_D0_A"="D0-A.fcs", "MD_8_D1A_A"="D1A-A.fcs", "MD_8_D1B_A"="D1B-A.fcs", "MD_8_D2A_A"="D2A-A.fcs", "MD_8_D2B_A"="D2B-A.fcs", "MD_8_D3A_A"="D3A-A.fcs", "MD_8_D3B_A"="D3B-A.fcs", "MD_8_D4A_A"="D4A-A.fcs", "MD_8_D4B_A"="D4B-A.fcs","MD_8_D5A_A"="D5A-A.fcs", "MD_8_D5B_A"="D5B-A.fcs", "MD_8_D6A_A"="D6A-A.fcs", "MD_8_D6B_A"="D6B-A.fcs","MD_8_D7A_A"="D7A-A.fcs", "MD_8_D7B_A"="D7B-A.fcs", "MD_8_D7AB_A"="D7AB-A.fcs", "MD_8_D7BB_A"="D7BB-A.fcs")
+
+for(key in names(MD_GM_8)){
+    assign(key, process(here("data", "CrossEnv", "Mueller_2025", "20250220_GM_Set8", MD_GM_8[key]), "B530-H", FALSE))
+}
+
+
+MD_GM_9 <- c("MD_9_D0_A"="D0-A.fcs", "MD_9_D1A_A"="D1A-A.fcs", "MD_9_D1B_A"="D1B-A.fcs", "MD_9_D2A_A"="D2A-A.fcs", "MD_9_D2B_A"="D2B-A.fcs", "MD_9_D3A_A"="D3A-A.fcs", "MD_9_D3B_A"="D3B-A.fcs", "MD_9_D4A_A"="D4A-A.fcs", "MD_9_D4B_A"="D4B-A.fcs","MD_9_D5A_A"="D5A-A.fcs", "MD_9_D5B_A"="D5B-A.fcs", "MD_9_D6A_A"="D6A-A.fcs", "MD_9_D6B_A"="D6B-A.fcs","MD_9_D7A_A"="D7A-A.fcs", "MD_9_D7B_A"="D7B-A.fcs", "MD_9_D7AB_A"="D7AB-A.fcs", "MD_9_D7BB_A"="D7BB-A.fcs")
+
+for(key in names(MD_GM_9)){
+    assign(key, process(here("data", "CrossEnv", "Mueller_2025", "20250225_GM_Set9", MD_GM_9[key]), "B530-H", FALSE))
+}
+```
+
+```{r}
+MD_Cour <- c("MD_C_30cm_48h_A"="30cm_48h_A.fcs", "MD_C_30cm_48h_B"="30cm_48h_B.fcs", "MD_C_30cm_48h_C"="30cm_48h_C.fcs", "MD_C_30cm_168h_A"="30cm_168h_A.fcs", "MD_C_30cm_168h_B"="30cm_168h_B.fcs", "MD_C_30cm_168h_C"="30cm_168h_C.fcs", "MD_C_76cm_48h_A"="76cm_48h_A.fcs", "MD_C_76cm_48h_B"="76cm_48h_B.fcs", "MD_C_76cm_48h_C"="76cm_48h_C.fcs", "MD_C_76cm_168h_A"="76cm_168h_A.fcs", "MD_C_76cm_168h_B"="76cm_168h_B.fcs", "MD_C_76cm_168h_C"="76cm_168h_C.fcs","MD_C_76cm_2h_A"="76cm_2h_A.fcs", "MD_C_76cm_2h_B"="76cm_2h_B.fcs", "MD_C_76cm_2h_C"="76cm_2h_C.fcs", "MD_C_76cm_96h_A"="76cm_96h_A.fcs", "MD_C_76cm_96h_B"="76cm_96h_B.fcs", "MD_C_76cm_96h_C"="76cm_96h_C.fcs")
+
+for(key in names(MD_Cour)){
+    assign(key, process(here("data", "CrossEnv", "Couradeau_2019", MD_Cour[key]), "530_40 {488}", FALSE))
+}
+```
+
+```{r}
+MD_Lindsay_2024 <- c("MD_L24_295"="AM_295_manifold_RSG_001.fcs", "MD_L24_296"="AM_296_manifold_RSG_001.fcs", "MD_L24_297"="AM_297_manifold_RSG_001.fcs", "MD_L24_300"="AM_300_acetate_RSG_0.fcs", "MD_L24_301"="AM_301_acetate_RSG_0.fcs", "MD_L24_302"="AM_302_CO_RSG_001.fcs",
+"MD_L24_303"="AM_303_CO_RSG_002.fcs",
+"MD_L24_306"="AM_306_NA_RSG_001.fcs",
+"MD_L24_307"="AM_307_H2_RSG_001.fcs",
+"MD_L24_308"="AM_308_H2_RSG_001.fcs")
+
+for(key in names(MD_Lindsay_2024)){
+    assign(key, process(here("data", "CrossEnv", "Lindsay_2024", MD_Lindsay_2024[key]), "531/40 [488]", FALSE, FALSE))
+}
+
+MD_Lindsay_2025 <- c("MD_L25_315"="AM_315_T0_zeroO2.fcs", "MD_L25_316"="AM_316_T0_zeroO2.fcs",
+"MD_L25_317"="AM_317_T25_zeroO2.fcs", 
+"MD_L25_318"="AM_318_T25_zeroO2.fcs", 
+"MD_L25_319"="AM_319_T25_25O2.fcs", 
+"MD_L25_320"="AM_320_T25_25O2.fcs",
+"MD_L25_321"="AM_321_T25_zeroO2.fcs",
+"MD_L25_322"="AM_322_T25_zeroO2.fcs",
+"MD_L25_323"="AM_323_T25_zeroO2_La.fcs",
+"MD_L25_324"="AM_324_T25_zeroO2_La.fcs",
+"MD_L25_325"="AM_325_T25_25O2_La.fcs",
+"MD_L25_326"="AM_326_T25_25O2_La.fcs")
+
+for(key in names(MD_Lindsay_2025)){
+    assign(key, process(here("data", "CrossEnv", "Lindsay_2025", MD_Lindsay_2025[key]), "531/40 [488]", FALSE, FALSE))
+}
+```
+
+```{r}
+MD_Amano_BONCAT <- read.csv(here("data", "CrossEnv", "Amano_2026", "Amano_2026_BONCAT.csv"), header = TRUE)
+
+MD_A_BC_100m_M2_A <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M2" & MD_Amano_BONCAT$depth_m == "100" & MD_Amano_BONCAT$repl == "A")[,"intensity_MGV.um2.h"])
+MD_A_BC_100m_M2_B <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M2" & MD_Amano_BONCAT$depth_m == "100" & MD_Amano_BONCAT$repl == "B")[,"intensity_MGV.um2.h"])
+MD_A_BC_400m_M2_A <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M2" & MD_Amano_BONCAT$depth_m == "400" & MD_Amano_BONCAT$repl == "A")[,"intensity_MGV.um2.h"])
+MD_A_BC_400m_M2_B <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M2" & MD_Amano_BONCAT$depth_m == "400" & MD_Amano_BONCAT$repl == "B")[,"intensity_MGV.um2.h"])
+MD_A_BC_500m_M2_A <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M2" & MD_Amano_BONCAT$depth_m == "500" & MD_Amano_BONCAT$repl == "A")[,"intensity_MGV.um2.h"])
+MD_A_BC_500m_M2_B <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M2" & MD_Amano_BONCAT$depth_m == "500" & MD_Amano_BONCAT$repl == "B")[,"intensity_MGV.um2.h"])
+
+
+MD_A_BC_500m_M3_A <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M3" & MD_Amano_BONCAT$depth_m == "500" & MD_Amano_BONCAT$repl == "A")[,"intensity_MGV.um2.h"])
+MD_A_BC_500m_M3_B <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M3" & MD_Amano_BONCAT$depth_m == "500" & MD_Amano_BONCAT$repl == "B")[,"intensity_MGV.um2.h"])
+MD_A_BC_1500m_M3_A <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M3" & MD_Amano_BONCAT$depth_m == "1500" & MD_Amano_BONCAT$repl == "A")[,"intensity_MGV.um2.h"])
+MD_A_BC_1500m_M3_B <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M3" & MD_Amano_BONCAT$depth_m == "1500" & MD_Amano_BONCAT$repl == "B")[,"intensity_MGV.um2.h"])
+
+
+MD_A_BC_100m_M4_A <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M4" & MD_Amano_BONCAT$depth_m == "100" & MD_Amano_BONCAT$repl == "A")[,"intensity_MGV.um2.h"])
+MD_A_BC_100m_M4_B <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M4" & MD_Amano_BONCAT$depth_m == "100" & MD_Amano_BONCAT$repl == "B")[,"intensity_MGV.um2.h"])
+MD_A_BC_2500m_M4_A <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M4" & MD_Amano_BONCAT$depth_m == "2500" & MD_Amano_BONCAT$repl == "A")[,"intensity_MGV.um2.h"])
+MD_A_BC_2500m_M4_B <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M4" & MD_Amano_BONCAT$depth_m == "2500" & MD_Amano_BONCAT$repl == "B")[,"intensity_MGV.um2.h"])
+MD_A_BC_3500m_M4_A <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M4" & MD_Amano_BONCAT$depth_m == "3500" & MD_Amano_BONCAT$repl == "A")[,"intensity_MGV.um2.h"])
+MD_A_BC_3500m_M4_B <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M4" & MD_Amano_BONCAT$depth_m == "3500" & MD_Amano_BONCAT$repl == "B")[,"intensity_MGV.um2.h"])
+MD_A_BC_4000m_M4_A <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M4" & MD_Amano_BONCAT$depth_m == "4000" & MD_Amano_BONCAT$repl == "A")[,"intensity_MGV.um2.h"])
+MD_A_BC_4000m_M4_B <- data.frame("RSG_ab" = subset(MD_Amano_BONCAT, MD_Amano_BONCAT$st == "M4" & MD_Amano_BONCAT$depth_m == "4000" & MD_Amano_BONCAT$repl == "B")[,"intensity_MGV.um2.h"])
+```
+
+# Amano et al. 2026 MAR data
+```{r}
+MD_Amano_MAR <- read.csv(here("data", "CrossEnv", "Amano_2026", "Amano_2026_MAR.csv"), header = TRUE)
+
+MD_A_MAR_100m_M2_A <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M2" & MD_Amano_MAR$depth_m == "100" & MD_Amano_MAR$repl == "A")[,"silver.grain_um2.h"])
+MD_A_MAR_100m_M2_B <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M2" & MD_Amano_MAR$depth_m == "100" & MD_Amano_MAR$repl == "B")[,"silver.grain_um2.h"])
+MD_A_MAR_400m_M2_A <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M2" & MD_Amano_MAR$depth_m == "400" & MD_Amano_MAR$repl == "A")[,"silver.grain_um2.h"])
+MD_A_MAR_400m_M2_B <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M2" & MD_Amano_MAR$depth_m == "400" & MD_Amano_MAR$repl == "B")[,"silver.grain_um2.h"])
+MD_A_MAR_500m_M2_A <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M2" & MD_Amano_MAR$depth_m == "500" & MD_Amano_MAR$repl == "A")[,"silver.grain_um2.h"])
+MD_A_MAR_500m_M2_B <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M2" & MD_Amano_MAR$depth_m == "500" & MD_Amano_MAR$repl == "B")[,"silver.grain_um2.h"])
+
+
+MD_A_MAR_500m_M3_A <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M3" & MD_Amano_MAR$depth_m == "500" & MD_Amano_MAR$repl == "A")[,"silver.grain_um2.h"])
+MD_A_MAR_500m_M3_B <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M3" & MD_Amano_MAR$depth_m == "500" & MD_Amano_MAR$repl == "B")[,"silver.grain_um2.h"])
+MD_A_MAR_1500m_M3_A <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M3" & MD_Amano_MAR$depth_m == "1500" & MD_Amano_MAR$repl == "A")[,"silver.grain_um2.h"])
+MD_A_MAR_1500m_M3_B <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M3" & MD_Amano_MAR$depth_m == "1500" & MD_Amano_MAR$repl == "B")[,"silver.grain_um2.h"])
+
+
+MD_A_MAR_100m_M4_A <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M4" & MD_Amano_MAR$depth_m == "100" & MD_Amano_MAR$repl == "A")[,"silver.grain_um2.h"])
+MD_A_MAR_100m_M4_B <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M4" & MD_Amano_MAR$depth_m == "100" & MD_Amano_MAR$repl == "B")[,"silver.grain_um2.h"])
+MD_A_MAR_2500m_M4_A <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M4" & MD_Amano_MAR$depth_m == "2500" & MD_Amano_MAR$repl == "A")[,"silver.grain_um2.h"])
+MD_A_MAR_2500m_M4_B <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M4" & MD_Amano_MAR$depth_m == "2500" & MD_Amano_MAR$repl == "B")[,"silver.grain_um2.h"])
+MD_A_MAR_3500m_M4_A <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M4" & MD_Amano_MAR$depth_m == "3500" & MD_Amano_MAR$repl == "A")[,"silver.grain_um2.h"])
+MD_A_MAR_3500m_M4_B <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M4" & MD_Amano_MAR$depth_m == "3500" & MD_Amano_MAR$repl == "B")[,"silver.grain_um2.h"])
+MD_A_MAR_4000m_M4_A <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M4" & MD_Amano_MAR$depth_m == "4000" & MD_Amano_MAR$repl == "A")[,"silver.grain_um2.h"])
+MD_A_MAR_4000m_M4_B <- data.frame("RSG_ab" = subset(MD_Amano_MAR, MD_Amano_MAR$st == "M4" & MD_Amano_MAR$depth_m == "4000" & MD_Amano_MAR$repl == "B")[,"silver.grain_um2.h"])
+```
+
+## Assign all samples to subgroups based on data type
+```{r}
+met_all <- list(MD_SP1, MD_SP2, MD_SP3, MD_SP4, MD_E1, MD_E2, MD_C_30cm_48h_A, MD_C_30cm_48h_B, MD_C_30cm_48h_C, MD_C_30cm_168h_A, MD_C_30cm_168h_B, MD_C_30cm_168h_C, MD_C_76cm_48h_A, MD_C_76cm_48h_B, MD_C_76cm_48h_C, MD_C_76cm_168h_A, MD_C_76cm_168h_B, MD_C_76cm_168h_C,MD_C_76cm_2h_A, MD_C_76cm_2h_B, MD_C_76cm_2h_C, MD_C_76cm_96h_A, MD_C_76cm_96h_B, MD_C_76cm_96h_C, MD_4_D0_A, MD_4_D1A_A, MD_4_D1B_A, MD_4_D2A_A, MD_4_D2B_A, MD_4_D3A_A, MD_4_D3B_A, MD_4_D4A_A, MD_4_D4B_A, MD_4_D5A_A, MD_4_D5B_A, MD_4_D6A_A, MD_4_D6B_A, MD_4_D7A_A, MD_4_D7B_A, MD_5_D0_A, MD_5_D1A_A, MD_5_D1B_A, MD_5_D2A_A, MD_5_D2B_A, MD_5_D3A_A, MD_5_D3B_A, MD_5_D4A_A, MD_5_D4B_A, MD_5_D5A_A, MD_5_D5B_A, MD_5_D6A_A, MD_5_D6B_A, MD_5_D7A_A, MD_5_D7B_A, MD_6_D0_A, MD_6_D1A_A, MD_6_D1B_A, MD_6_D2A_A, MD_6_D2B_A, MD_6_D3A_A, MD_6_D3B_A, MD_6_D4A_A, MD_6_D4B_A, MD_6_D5A_A, MD_6_D5B_A, MD_6_D6A_A, MD_6_D6B_A, MD_6_D7A_A, MD_6_D7B_A, MD_7_D0_A, MD_7_D1A_A, MD_7_D1B_A, MD_7_D2A_A, MD_7_D2B_A, MD_7_D3A_A, MD_7_D3B_A, MD_7_D4A_A, MD_7_D4B_A, MD_7_D5A_A, MD_7_D5B_A, MD_7_D6A_A, MD_7_D6B_A, MD_7_D7A_A, MD_7_D7B_A, MD_8_D0_A, MD_8_D1A_A, MD_8_D1B_A, MD_8_D2A_A, MD_8_D2B_A, MD_8_D3A_A, MD_8_D3B_A, MD_8_D4A_A, MD_8_D4B_A, MD_8_D5A_A, MD_8_D5B_A, MD_8_D6A_A, MD_8_D6B_A, MD_8_D7A_A, MD_8_D7B_A, MD_9_D0_A, MD_9_D1A_A, MD_9_D1B_A, MD_9_D2A_A, MD_9_D2B_A, MD_9_D3A_A, MD_9_D3B_A, MD_9_D4A_A, MD_9_D4B_A, MD_9_D5A_A, MD_9_D5B_A, MD_9_D6A_A, MD_9_D6B_A, MD_9_D7A_A, MD_9_D7B_A, MD_4_D7AB_A, MD_4_D7BB_A, MD_5_D7AB_A, MD_5_D7BB_A, MD_6_D7AB_A, MD_6_D7BB_A, MD_7_D7AB_A, MD_7_D7BB_A, MD_8_D7AB_A, MD_8_D7BB_A, MD_9_D7AB_A, MD_9_D7BB_A, MD_L24_295, MD_L24_296, MD_L24_297, MD_L24_300, MD_L24_301, MD_L24_302, MD_L24_303, MD_L24_306, MD_L24_307, MD_L24_308, MD_L25_315, MD_L25_316, MD_L25_317, MD_L25_318, MD_L25_319, MD_L25_320, MD_L25_321, MD_L25_322, MD_L25_323, MD_L25_324, MD_L25_325, MD_L25_326, MD_A_BC_100m_M2_A, MD_A_BC_100m_M2_B, MD_A_BC_400m_M2_A, MD_A_BC_400m_M2_B, MD_A_BC_500m_M2_A, MD_A_BC_500m_M2_B, MD_A_BC_500m_M3_A, MD_A_BC_500m_M3_B, MD_A_BC_1500m_M3_A, MD_A_BC_1500m_M3_B, MD_A_BC_100m_M4_A, MD_A_BC_100m_M4_B, MD_A_BC_2500m_M4_A, MD_A_BC_2500m_M4_B, MD_A_BC_3500m_M4_A, MD_A_BC_3500m_M4_B, MD_A_BC_4000m_M4_A, MD_A_BC_4000m_M4_B, MD_A_MAR_100m_M2_A, MD_A_MAR_100m_M2_B, MD_A_MAR_400m_M2_A, MD_A_MAR_400m_M2_B, MD_A_MAR_500m_M2_A, MD_A_MAR_500m_M2_B, MD_A_MAR_500m_M3_A, MD_A_MAR_1500m_M3_A, MD_A_MAR_1500m_M3_B, MD_A_MAR_100m_M4_A, MD_A_MAR_100m_M4_B, MD_A_MAR_2500m_M4_A, MD_A_MAR_2500m_M4_B, MD_A_MAR_3500m_M4_A, MD_A_MAR_3500m_M4_B, MD_A_MAR_4000m_M4_A, MD_A_MAR_4000m_M4_B)
+
+samples_all <- c("MD_SP1", "MD_SP2", "MD_SP3", "MD_SP4", "MD_E1", "MD_E2", "MD_C_30cm_48h_A", "MD_C_30cm_48h_B", "MD_C_30cm_48h_C", "MD_C_30cm_168h_A", "MD_C_30cm_168h_B", "MD_C_30cm_168h_C", "MD_C_76cm_48h_A", "MD_C_76cm_48h_B", "MD_C_76cm_48h_C", "MD_C_76cm_168h_A", "MD_C_76cm_168h_B", "MD_C_76cm_168h_C", "MD_C_76cm_2h_A", "MD_C_76cm_2h_B", "MD_C_76cm_2h_C", "MD_C_76cm_96h_A", "MD_C_76cm_96h_B", "MD_C_76cm_96h_C", "MD_4_D0_A", "MD_4_D1A_A", "MD_4_D1B_A", "MD_4_D2A_A", "MD_4_D2B_A", "MD_4_D3A_A", "MD_4_D3B_A", "MD_4_D4A_A", "MD_4_D4B_A", "MD_4_D5A_A", "MD_4_D5B_A", "MD_4_D6A_A", "MD_4_D6B_A", "MD_4_D7A_A", "MD_4_D7B_A", "MD_5_D0_A", "MD_5_D1A_A", "MD_5_D1B_A", "MD_5_D2A_A", "MD_5_D2B_A", "MD_5_D3A_A", "MD_5_D3B_A", "MD_5_D4A_A", "MD_5_D4B_A", "MD_5_D5A_A", "MD_5_D5B_A", "MD_5_D6A_A", "MD_5_D6B_A", "MD_5_D7A_A", "MD_5_D7B_A", "MD_6_D0_A", "MD_6_D1A_A", "MD_6_D1B_A", "MD_6_D2A_A", "MD_6_D2B_A", "MD_6_D3A_A", "MD_6_D3B_A", "MD_6_D4A_A", "MD_6_D4B_A", "MD_6_D5A_A", "MD_6_D5B_A", "MD_6_D6A_A", "MD_6_D6B_A", "MD_6_D7A_A", "MD_6_D7B_A", "MD_7_D0_A", "MD_7_D1A_A", "MD_7_D1B_A", "MD_7_D2A_A", "MD_7_D2B_A", "MD_7_D3A_A", "MD_7_D3B_A", "MD_7_D4A_A", "MD_7_D4B_A", "MD_7_D5A_A", "MD_7_D5B_A", "MD_7_D6A_A", "MD_7_D6B_A", "MD_7_D7A_A", "MD_7_D7B_A", "MD_8_D0_A", "MD_8_D1A_A", "MD_8_D1B_A", "MD_8_D2A_A", "MD_8_D2B_A", "MD_8_D3A_A", "MD_8_D3B_A", "MD_8_D4A_A", "MD_8_D4B_A", "MD_8_D5A_A", "MD_8_D5B_A", "MD_8_D6A_A", "MD_8_D6B_A", "MD_8_D7A_A", "MD_8_D7B_A", "MD_9_D0_A", "MD_9_D1A_A", "MD_9_D1B_A", "MD_9_D2A_A", "MD_9_D2B_A", "MD_9_D3A_A", "MD_9_D3B_A", "MD_9_D4A_A", "MD_9_D4B_A", "MD_9_D5A_A", "MD_9_D5B_A", "MD_9_D6A_A", "MD_9_D6B_A", "MD_9_D7A_A", "MD_9_D7B_A", "MD_4_D7AB_A", "MD_4_D7BB_A", "MD_5_D7AB_A", "MD_5_D7BB_A", "MD_6_D7AB_A", "MD_6_D7BB_A", "MD_7_D7AB_A", "MD_7_D7BB_A", "MD_8_D7AB_A", "MD_8_D7BB_A", "MD_9_D7AB_A", "MD_9_D7BB_A", "MD_L24_295", "MD_L24_296", "MD_L24_297", "MD_L24_300", "MD_L24_301", "MD_L24_302", "MD_L24_303", "MD_L24_306", "MD_L24_307", "MD_L24_308", "MD_L25_315", "MD_L25_316", "MD_L25_317", "MD_L25_318", "MD_L25_319", "MD_L25_320", "MD_L25_321", "MD_L25_322", "MD_L25_323", "MD_L25_324", "MD_L25_325", "MD_L25_326", "MD_A_BC_100m_M2_A", "MD_A_BC_100m_M2_B", "MD_A_BC_400m_M2_A", "MD_A_BC_400m_M2_B", "MD_A_BC_500m_M2_A", "MD_A_BC_500m_M2_B", "MD_A_BC_500m_M3_A", "MD_A_BC_500m_M3_B", "MD_A_BC_1500m_M3_A", "MD_A_BC_1500m_M3_B", "MD_A_BC_100m_M4_A", "MD_A_BC_100m_M4_B", "MD_A_BC_2500m_M4_A", "MD_A_BC_2500m_M4_B", "MD_A_BC_3500m_M4_A", "MD_A_BC_3500m_M4_B", "MD_A_BC_4000m_M4_A", "MD_A_BC_4000m_M4_B", "MD_A_MAR_100m_M2_A", "MD_A_MAR_100m_M2_B", "MD_A_MAR_400m_M2_A", "MD_A_MAR_400m_M2_B", "MD_A_MAR_500m_M2_A", "MD_A_MAR_500m_M2_B", "MD_A_MAR_500m_M3_A", "MD_A_MAR_1500m_M3_A", "MD_A_MAR_1500m_M3_B", "MD_A_MAR_100m_M4_A", "MD_A_MAR_100m_M4_B", "MD_A_MAR_2500m_M4_A", "MD_A_MAR_2500m_M4_B", "MD_A_MAR_3500m_M4_A", "MD_A_MAR_3500m_M4_B", "MD_A_MAR_4000m_M4_A", "MD_A_MAR_4000m_M4_B")
+
+met_xy <- list(SH_DC, SH_DC_T1, SH_DC_T3, SH_DC_T7, SH_NS_Feb, MD_N_BeauS, MD_N_BeauW, MD_N_ChukS, MD_N_ChukW)
+
+samples_xy <- c("SH_DC", "SH_DC_T1", "SH_DC_T3", "SH_DC_T7", "SH_NS_Feb", "MD_N_BeauS", "MD_N_BeauW", "MD_N_ChukS", "MD_N_ChukW")
+
+Ncells <- 0
+for(met in met_all){
+  Ncells <- Ncells + length(met[,"RSG_ab"])
+}
+
+Ncells 
+```
+
+```{r}
+met_samples <- data.frame("Sample" = c(samples_all, samples_xy), "Set" = c(rep("Smriga", 6), rep("Couradeau", 18), rep("GutModel", 90), rep("GutBiofilm", 12), rep("Lindsay_24", 10), rep("Lindsay_25", 12), rep("Amano", 35), rep("SH", 5), rep("Nikrad", 4)), "Matrix" = c(rep("Marine", 6), rep("Soil", 18), rep("Gut", 90), rep("Gut", 12), rep("Sediment", 10), rep("Sediment", 12), rep("Marine", 35), rep("Marine", 5), rep("Marine", 4)))
+```
+
+# FIGURE S9. QQ-plots for Lognormal, Gamma, Pareto
+
+#Lnorm - all data
+```{r}
+metn <- 1
+ln_fits <- data.frame("Sample" = NA, "Set" = NA, "RSG_ab" = NA, "qlnorm" = NA)
+ln_param <- data.frame("Sample" = NA, "meanlog" = NA, "sdlog" = NA, "AIC_ln" = NA,"BIC_ln" = NA, "lL_ln" = NA, "R2_ln" = NA)
+for(met1 in met_all){
+  
+  met_sub <- met1
+  nll_ln <- function(meanlog, sdlog) {
+    -sum(dlnorm((met_sub[,"RSG_ab"]), meanlog = meanlog, sdlog = sdlog, log = TRUE))
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_ln,
+    start = list(meanlog = 1, sdlog = median(met_sub[,"RSG_ab"])),  # Reasonable starting values
+    method = "Nelder-Mead"
+  )
+  print(samples_all[metn])
+#  print(summary(mle_fit))
+  
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  
+  qlnorm <- qlnorm(e_cdf, meanlog = coef(mle_fit)[1], sdlog = coef(mle_fit)[2])
+  
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ plnorm(met_sub[,"RSG_ab"], coef(mle_fit)[1], coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])),rep(met_samples[metn, "Set"], length(met_sub[,"RSG_ab"])), met_sub[,"RSG_ab"], qlnorm)
+  ln_param <- rbind(ln_param, data.frame("Sample" = samples_all[metn], "meanlog" = coef(mle_fit)[1], "sdlog" = coef(mle_fit)[2], "AIC_ln" = AIC(mle_fit),"BIC_ln" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_ln" = logLik(mle_fit), "R2_ln" = R2))
+  colnames(fit) <- c("Sample", "Set", "RSG_ab", "qlnorm")
+  ln_fits <- rbind(ln_fits, fit)
+  
+  metn <- metn + 1
+}
+
+metn <- 1
+
+for(met_sub in met_xy){
+  x <- met_sub[,"Bin"]
+  y <- met_sub[,"Per_cells"]
+  model <- glm(log(y) ~ x, family = gaussian())
+  meanlog <- mean(log(y))
+  sdlog <- sd(residuals(model))
+  R2 <- summary(lm(exp(predict(model, newdata = data.frame(x = met_sub[,"Bin"]))) ~ met_sub[,"Per_cells"]))$r.squared
+  qlnorm <- exp(predict(model, newdata = data.frame(x = met_sub[,"Bin"])))
+  
+  fit <- cbind(rep(samples_xy[metn], length(met_sub[,"Per_cells"])),rep(met_samples[metn+183, "Set"], length(met_sub[,"Per_cells"])), met_sub[,"Per_cells"], qlnorm)
+  ln_param <- rbind(ln_param, data.frame("Sample" = samples_xy[metn], "meanlog" = meanlog, "sdlog" = sdlog, "AIC_ln" = AIC(model),"BIC_ln" = BIC(model), "lL_ln" = logLik(model), "R2_ln" = R2))
+  colnames(fit) <- c("Sample", "Set", "RSG_ab", "qlnorm")
+  ln_fits <- rbind(ln_fits, fit)
+  
+  metn <- metn + 1
+}
+
+ln_fits <- ln_fits[-1,]
+ln_fits <- subset(ln_fits, ln_fits$qlnorm != "Inf")
+ln_param <- ln_param[-1,]
+ln_fits <- subset(ln_fits, !(ln_fits$Sample %in% c("MD_9_D1A_A", "MD_9_D1B_A", "MD_5_D1A_A")))
+
+CI <- data.frame("x_ci" = seq(0, 9, 0.5), "y_ci" = seq(0, 9, 0.5))
+
+
+met_samples <- cbind(met_samples, ln_param[,c("meanlog", "sdlog", "AIC_ln", "BIC_ln", "lL_ln", "R2_ln")])
+ln_fits$RSG_ab <- as.numeric(ln_fits$RSG_ab)
+ln_fits$qlnorm <- as.numeric(ln_fits$qlnorm)
+
+top20 <- c()
+for(met1 in met_all){
+  quantile_cutoff <- quantile(met1$RSG_ab, 0.8)
+  total_activity <- sum(met1$RSG_ab)
+  top20_activity <- sum(subset(met1, met1$RSG_ab > quantile_cutoff)$RSG_ab)
+  top20_fraction <- top20_activity/total_activity
+  top20 <- c(top20, top20_fraction)
+}
+
+xy_top20 <- c()
+#SH_DC
+sum(SH_DC[7:18, "Per_cells"])
+per_20 <- sum(SH_DC[7:18, "Bin"] * SH_DC[7:18, "Per_cells"])/sum(SH_DC[, "Bin"] * SH_DC[, "Per_cells"])
+xy_top20 <- c(xy_top20,per_20)
+
+#SH_DC_T1
+sum(SH_DC_T1[11:20, "Per_cells"])
+per_20 <- sum(SH_DC_T1[11:20, "Bin"] * SH_DC_T1[11:20, "Per_cells"])/sum(SH_DC_T1[, "Bin"] * SH_DC_T1[, "Per_cells"])
+xy_top20 <- c(xy_top20,per_20)
+
+#SH_DC_T3
+sum(SH_DC_T3[11:16, "Per_cells"])
+per_20 <- sum(SH_DC_T3[11:16, "Bin"] * SH_DC_T3[11:16, "Per_cells"])/sum(SH_DC_T3[, "Bin"] * SH_DC_T3[, "Per_cells"])
+xy_top20 <- c(xy_top20,per_20)
+
+#SH_DC_T7
+sum(SH_DC_T7[15:18, "Per_cells"])
+per_20 <- sum(SH_DC_T7[15:18, "Bin"] * SH_DC_T7[15:18, "Per_cells"])/sum(SH_DC_T7[, "Bin"] * SH_DC_T7[, "Per_cells"])
+xy_top20 <- c(xy_top20,per_20)
+
+#SH_DC_T7
+sum(SH_NS_Feb[09:30, "Per_cells"])
+per_20 <- sum(SH_NS_Feb[09:30, "Bin"] * SH_NS_Feb[09:30, "Per_cells"])/sum(SH_NS_Feb[, "Bin"] * SH_NS_Feb[, "Per_cells"])
+xy_top20 <- c(xy_top20,per_20)
+
+#N_BeauS
+sum(MD_N_BeauS[4:14, "Per_cells"])
+per_20 <- sum(MD_N_BeauS[4:14, "Bin"] * MD_N_BeauS[4:14, "Per_cells"])/sum(MD_N_BeauS[, "Bin"] * MD_N_BeauS[, "Per_cells"])
+xy_top20 <- c(xy_top20,per_20)
+
+#N_BeauW
+sum(MD_N_BeauW[3:7, "Per_cells"])
+per_20 <- sum(MD_N_BeauW[3:7, "Bin"] * MD_N_BeauW[3:7, "Per_cells"])/sum(MD_N_BeauW[, "Bin"] * MD_N_BeauW[, "Per_cells"])
+xy_top20 <- c(xy_top20,per_20)
+
+#N_ChukS
+sum(MD_N_ChukS[3:7, "Per_cells"])
+per_20 <- sum(MD_N_ChukS[3:7, "Bin"] * MD_N_ChukS[3:7, "Per_cells"])/sum(MD_N_ChukS[, "Bin"] * MD_N_ChukS[, "Per_cells"])
+xy_top20 <- c(xy_top20,per_20)
+
+#N_ChukW
+sum(MD_N_ChukW[2:10, "Per_cells"])
+per_20 <- sum(MD_N_ChukW[2:10, "Bin"] * MD_N_ChukW[2:10, "Per_cells"])/sum(MD_N_ChukS[, "Bin"] * MD_N_ChukS[, "Per_cells"])
+xy_top20 <- c(xy_top20,per_20)
+
+met_samples$top20 <- c(top20, xy_top20)
+
+ln_cross <- met_samples
+
+ln_fresh <- readRDS("../data/CrossEnv/ln_freshwater")
+
+ln_all <- rbind(ln_cross, ln_fresh)
+ln_all$SubMatrix <- c(rep("Coastal", 6), rep("Deep", 12), rep("Shallow", 6), rep("Unattached", 90), rep("Attached", 12), rep("Anoxic", 10), rep("Anoxic", 4), rep("Dysoxic", 2), rep("Anoxic", 4), rep("Dysoxic", 2), rep("Open", 35), rep("Open", 9), rep("Continuous", 36), rep("Environmental", 28), rep("Batch", 50))
+ln_all$Method <- c(rep("Click", 6), rep("Click", 18), rep("Redox", 102), rep("Redox", 22), rep("Click", 18), rep("MAR", 17), rep("MAR" ,5), rep("Mar", 4), rep("Redox", 114))
+
+ln_all$Matrix <- factor(ln_all$Matrix, c("Marine", "Sediment", "Soil", "Gut", "Freshwater"))
+ln_all$SubMatrix <- factor(ln_all$SubMatrix, c("Open", "Coastal","Anoxic","Dysoxic", "Shallow", "Deep", "Unattached", "Attached", "Batch", "Continuous", "Environmental"))
+
+# Takes a while to run (= 0.99)
+# ln_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(ln_fits, 5000)
+#   ln_boots <- c(ln_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qlnorm, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# ln_boot_r2 <- round(mean(ln_boots),2)
+
+Lnorm_fit_plot <- ln_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qlnorm, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[3])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", size = 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Lognormal")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)==0.99", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(1,8), ylim = c(-4, 8))
+
+Lnorm_fit_plot
+```
+
+## Gamma
+```{r}
+metn <- 1
+g_fits <- data.frame("Sample" = NA, "Set" = NA, "RSG_ab" = NA, "qgamma" = NA)
+g_param <- data.frame("Sample" = NA, "shape" = NA, "scale" = NA, "AIC_g" = NA, "BIC_g" = NA, "lL_g" = NA, "R2_g" = NA)
+for(met1 in met_all){
+  met_sub <- met1
+  nll_g <- function(shape, scale) {
+    -sum(dgamma((met_sub[,"RSG_ab"]), shape = shape, scale = scale, log = TRUE))
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_g,
+    start = list(shape = 1, scale = 10),
+    lower = c(0.001, 0.001),
+    upper = c(Inf, Inf),
+    method = "L-BFGS-B"
+  )
+  print(samples_all[metn])
+#  print(summary(mle_fit))
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  qgamma <- qgamma(e_cdf, shape = coef(mle_fit)[1], scale = coef(mle_fit)[2])
+  
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ pgamma(met_sub[,"RSG_ab"], shape = coef(mle_fit)[1], scale = coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])),rep(met_samples[metn, "Set"], length(met_sub[,"RSG_ab"])),  met_sub[,"RSG_ab"], qgamma)
+  colnames(fit) <- c("Sample", "Set", "RSG_ab", "qgamma")
+  g_param <- rbind(g_param, data.frame("Sample" = samples_all[metn], "shape" = coef(mle_fit)[1], "scale" = coef(mle_fit)[2], "AIC_g" = AIC(mle_fit), "BIC_g" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_g" = logLik(mle_fit), "R2_g" = R2))
+  g_fits <- rbind(g_fits, fit)
+  
+  metn <- metn + 1
+}
+
+rm(Gamma)
+metn <- 1
+
+for(met_sub in met_xy){
+  x <- met_sub[,"Bin"]
+  y <- met_sub[,"Per_cells"]
+  model <- glm(y ~ x, family = Gamma)
+  mu_hat <- fitted(model)
+  shape <- 1/summary(model)$dispersion
+  scale <- mean(mu_hat/shape)
+  R2 <- cor(model$y, fitted(model))^2
+  qgamma <- predict(model, newdata = data.frame(x = met_sub[,"Bin"]))
+  
+  fit <- cbind(rep(samples_xy[metn], length(met_sub[,"Per_cells"])),rep(met_samples[metn+183, "Set"], length(met_sub[,"Per_cells"])), met_sub[,"Per_cells"], qgamma)
+  g_param <- rbind(g_param, data.frame("Sample" = samples_xy[metn], "shape" = shape, "scale" = scale, "AIC_g" = AIC(model),"BIC_g" = BIC(model), "lL_g" = logLik(model), "R2_g" = R2))
+  colnames(fit) <- c("Sample", "Set", "RSG_ab", "qgamma")
+  g_fits <- rbind(g_fits, fit)
+
+  metn <- metn + 1
+}
+  
+
+g_fits <- g_fits[-1,]
+g_fits <- subset(g_fits, g_fits$qgamma != "Inf")
+g_param <- g_param[-1,]
+
+met_samples <- cbind(met_samples, g_param[,c("shape", "scale", "AIC_g", "BIC_g", "lL_g", "R2_g")])
+
+g_fits$RSG_ab <- as.numeric(g_fits$RSG_ab)
+g_fits$qgamma <- as.numeric(g_fits$qgamma)
+
+# g_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(g_fits, 5000)
+#   g_boots <- c(g_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qgamma, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# g_boot_r2 <- round(mean(g_boots),2)
+
+
+CI <- data.frame("x_ci" = seq(-5, 8, 0.5), "y_ci" = seq(-5, 8, 0.5))
+
+Gamma_fit_plot <- g_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qgamma, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[1])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", linewidth= 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Gamma")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)==0.97", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(1,8), ylim = c(-4, 8))+
+  theme(legend.position = "none")
+
+Gamma_fit_plot
+```
+
+
+#Pareto - all data
+```{r}
+metn <- 1
+p_fits <- data.frame("Sample" = NA, "Set" = NA, "RSG_ab" = NA, "qpareto" = NA)
+p_param <- data.frame("Sample" = NA, "shape_p" = NA, "scale_p" = NA, "AIC_p" = NA, "BIC_p" = NA, "lL_p" = NA, "R2_p" = NA)
+for(met1 in met_all){
+  
+  met_sub <- met1
+  nll_p <- function(shape, scale) {
+    -sum(actuar::dpareto((met_sub[,"RSG_ab"]), shape = shape, scale = scale, log = TRUE))
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_p,
+    start = list(shape = 1, scale = median(met_sub[,"RSG_ab"])),  # Reasonable starting values
+    lower = c(0.001, 0.001),
+    upper = c(Inf, Inf),
+    method = "L-BFGS-B"
+  )
+  print(samples_all[metn])
+#  print(summary(mle_fit))
+  
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  
+  qpareto <- actuar::qpareto(e_cdf, shape = coef(mle_fit)[1], scale = coef(mle_fit)[2])
+  
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ actuar::ppareto(met_sub[,"RSG_ab"], coef(mle_fit)[1], coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])),rep(met_samples[metn, "Set"], length(met_sub[,"RSG_ab"])), met_sub[,"RSG_ab"], qpareto)
+  p_param <- rbind(p_param, data.frame("Sample" = samples_all[metn], "shape_p" = coef(mle_fit)[1], "scale_p" = coef(mle_fit)[2], "AIC_p" = AIC(mle_fit), "BIC_p" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_p" = logLik(mle_fit), "R2_p" = R2))
+  colnames(fit) <- c("Sample", "Set", "RSG_ab", "qpareto")
+  p_fits <- rbind(p_fits, fit)
+  
+  metn <- metn + 1
+}
+
+metn <- 1
+
+for(met_sub in met_xy){
+  x <- met_sub[,"Bin"]
+  y <- met_sub[,"Per_cells"]
+  model <- vgam(y ~ x, gpd(threshold = 0))
+  scale <- exp(Coef(model)[1])
+  shape <- exp(Coef(model)[2] + 0.5)
+  R2 <- (cor(model@y, fitted(model))^2)[1]
+  qpareto <- predict(model, newdata = data.frame(x = met_sub[,"Bin"]))[,"loglink(scale)"]
+  
+  fit <- cbind(rep(samples_xy[metn], length(met_sub[,"Per_cells"])),rep(met_samples[metn+183, "Set"], length(met_sub[,"Per_cells"])), met_sub[,"Per_cells"], qpareto)
+  p_param <- rbind(p_param, data.frame("Sample" = samples_xy[metn], "shape_p" = shape, "scale_p" = scale, "AIC_p" = AIC(model),"BIC_p" = BIC(model), "lL_p" = logLik(model), "R2_p" = R2))
+  colnames(fit) <- c("Sample", "Set", "RSG_ab", "qpareto")
+  p_fits <- rbind(p_fits, fit)
+
+  metn <- metn + 1
+}
+
+p_fits <- p_fits[-1,]
+p_fits <- subset(p_fits, p_fits$qpareto != "Inf")
+p_param <- p_param[-1,]
+met_samples <- cbind(met_samples, p_param[,c("shape_p", "scale_p", "AIC_p", "BIC_p", "lL_p", "R2_p")])
+
+p_fits$RSG_ab <- as.numeric(p_fits$RSG_ab)
+p_fits$qpareto <- as.numeric(p_fits$qpareto)
+
+rownames(met_samples) <- NULL
+
+# p_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(p_fits, 5000)
+#   p_boots <- c(p_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qpareto, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# p_boot_r2 <- round(mean(p_boots),2)
+
+CI <- data.frame("x_ci" = seq(-5, 8, 0.5), "y_ci" = seq(-5, 8, 0.5))
+
+Pareto_fit_plot <- p_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qpareto, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[4])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", size = 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Pareto")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)=='0.96'", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(1,8), ylim = c(-4, 8))+
+  theme(legend.position = "none")
+
+Pareto_fit_plot
+```
+
+```{r}
+plot <- plot_grid(
+  Lnorm_fit_plot + theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  Gamma_fit_plot+ theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  Pareto_fit_plot+ theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  nrow = 1,
+  align = 'vh',
+  rel_widths = c(1,1,1)
+)
+plot
+
+x.axis <- plot_grid(
+  NULL,
+  get_plot_component(Lnorm_fit_plot, 'xlab-b'),
+  nrow = 1,
+  rel_widths = c(0.2,1)
+)
+
+qq_plots <- ggdraw(plot_grid(plot_grid(get_plot_component(Lnorm_fit_plot, 'ylab-l'), plot, nrow = 1, rel_widths = c(0.1,1)),x.axis, ncol = 1, rel_heights = c(1,0.2)))+
+    theme(plot.background = element_rect(fill= "white", color = NA))+
+    draw_plot_label(label = c("(c)", "(d)", "(e)"), size = 20, x=c(0.08, 0.38, 0.69), y = c(1, 1, 1))
+
+qq_plots
+```
+
+
+```{r}
+KSs <- data.frame("Sample" = NA, "Set" = NA, "ks_g" = NA, "ks_p" = NA, "ks_ln" = NA)
+
+rownames(met_samples) <- NULL
+
+set.seed(47405)
+
+metn <- 1
+for(met in met_all){
+ ks_g <- ks.test(met[,"RSG_ab"], "pgamma", shape = g_param[metn, "shape"], scale = g_param[metn, "scale"])$statistic
+ ks_ln <- ks.test(met[,"RSG_ab"], "plnorm", meanlog = ln_param[metn, "meanlog"], sdlog = ln_param[metn, "sdlog"])$statistic
+  ks_p <- ks.test(met[,"RSG_ab"], actuar::ppareto, shape = p_param[metn, "shape_p"], scale = p_param[metn, "scale_p"])$statistic
+  KSs <- rbind(KSs, c("Sample" = samples_all[metn], "Set" = met_samples[metn, "Set"], "ks_g" = ks_g, "ks_p" = ks_p, "ks_ln" = ks_ln))
+  metn <- metn + 1
+}
+
+KSs <- KSs[-1,]
+KSs <- gather(KSs, key = "dist", value = "KS", ks_g:ks_ln)
+KSs$KS <- as.numeric(KSs$KS)
+KSs$dist <- factor(KSs$dist, levels = c("ks_ln", "ks_g", "ks_p"))
+
+
+fit <- aov(KS ~ dist, data = KSs)
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist), adjust = "Tukey")
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+KSs$dist <- factor(KSs$dist, levels = c("ks_ln", "ks_g", "ks_p"))
+KS_cld <- data.frame("x" = c(1,2,3), "y" = rep(0.5, 3), "label" = c("b", "b", "a"))
+
+KS_plot_all <- ggplot()+
+  geom_boxplot(data = KSs, aes(x = dist, y = KS, color = dist))+
+  ylim(c(0, 0.5))+
+  ylab("K-S statistic")+
+  geom_text(data = KS_cld, aes(x = x, y = y, label = label))+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Pareto"))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[4]), labels = c("Lognormal", "Gamma", "Pareto"))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5,color = "black"), axis.ticks.x =  element_blank(), axis.title.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), legend.position = "bottom")
+
+KS_plot_all
+```
+
+```{r}
+met_samples <- subset(met_samples, !(met_samples$Sample %in% c("MD_9_D1A_A", "MD_9_D1B_A", "MD_5_D1A_A")))
+R2s <- met_samples[,c("Sample", "Set", "R2_g", "R2_ln","R2_p")]
+R2s <- gather(R2s, key = "dist", value = R2, R2_g:R2_p)
+
+R2s$dist <- factor(R2s$dist, levels = c("R2_ln", "R2_g", "R2_p"))
+
+fit <- aov(R2 ~ dist, data = R2s)
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist))
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+R2s$dist <- factor(R2s$dist, levels = c("R2_ln", "R2_g", "R2_p"))
+R2_cld <- data.frame("x" = c(1,2,3), "y" = rep(1.05, 3), "label" = c("a", "b", "ab"))
+
+
+R2_plot_all <- ggplot()+
+  geom_boxplot(data = R2s, aes(x = dist, y = R2, color = dist))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[4]), labels = c("Lognormal", "Gamma", "Pareto"))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 90,hjust = 1, vjust = 0.5,  color = "black"), axis.ticks.x =  element_blank(), axis.title.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), legend.position = "bottom")+
+  ylab(expression(italic('r'^2)))+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Pareto"))+
+  ylim(c(0.5, 1.05))+
+  geom_text(data = R2_cld, aes(x = x, y = y, label = label))
+
+R2_plot_all
+```
+
+```{r}
+R2_KS <- ggdraw()+
+  draw_plot(R2_plot_all + guides(color = "none"), x = 0, y = 0, width = 0.5, height = 1)+
+  draw_plot(KS_plot_all + guides(color = "none"), x = 0.5, y = 0, width = 0.5, height = 1)+
+  theme(plot.background = element_rect(fill= "white", color = NA))+
+  draw_plot_label(label = c("(a)", "(b)"), size = 20, x=c(0, 0.5), y = c(1, 1))
+
+R2_KS
+
+ggdraw(plot_grid(R2_KS, NULL, plot_grid(NULL, qq_plots, NULL, nrow = 1, rel_widths = c(0.05, 0.9, 0.05)), ncol = 1, rel_heights = c(0.5, 0.01, 0.5)))+
+    theme(plot.background = element_rect(fill= "white", color = NA))
+
+ggsave("../output/FigS9_CrossEnvfits.png", width = 11, height = 9)
+```
+```{r}
+sdlog_all <- ggplot(ln_all, aes(x = Matrix, y = sdlog))+
+  geom_violin()+
+  geom_jitter(aes(shape = SubMatrix, color = Matrix))+
+  scale_color_manual(values = c(cols[1:4], cols[8]))+
+  scale_shape_manual(values = c(1,16,1,16,1,16,1,16,16,1,8))+
+  ylab(expression(paste("Skewness of activity (", sigma, ")")))+
+  xlab("Environment")+
+  guides(color = "none", shape = "none")+
+  ylim(c(-0.8, 2.35))+
+  geom_point(aes(x = 0.75, y = -0.2), color = cols[1], shape = 16)+
+  annotate("text", x = 0.85, y = -0.2, color = cols[1], label = "Coastal", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 0.75, y = -0.45), color = cols[1], shape = 1)+
+  annotate("text", x = 0.85, y = -0.45, color = cols[1],label = "Open", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 1.75, y = -0.2), color = cols[2], shape = 16)+
+  annotate("text", x = 1.85, y = -0.2, color = cols[2], label = "Hypoxic", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 1.75, y = -0.45), color = cols[2], shape = 1)+
+  annotate("text", x = 1.85, y = -0.45, color = cols[2],label = "Anoxic", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 2.75, y = -0.2), color = cols[3], shape = 16)+
+  annotate("text", x = 2.85, y = -0.2, color = cols[3], label = "Deep", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 2.75, y = -0.45), color = cols[3], shape = 1)+
+  annotate("text", x = 2.85, y = -0.45, color = cols[3], label = "Shallow",size = 3.5, hjust = 0)+
+  geom_point(aes(x = 3.75, y = -0.2), color = cols[4], shape = 16)+
+  annotate("text", x = 3.85, y = -0.2,color = cols[4],label = "Attached",size = 3.5, hjust = 0)+
+  geom_point(aes(x = 3.75, y = -0.45), color = cols[4], shape = 1)+
+  annotate("text", x = 3.85, y = -0.45,color = cols[4],label = "Unattached", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 4.75, y = -0.075), color = cols[8], shape = 16)+
+  annotate("text", x = 4.85, y = -0.075,color = cols[8], label = "Batch", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 4.75, y = -0.325), color = cols[8], shape = 1)+
+  annotate("text", x = 4.85, y = -0.325,color = cols[8],label = "Continuous",size = 3.5,hjust = 0)+
+  geom_point(aes(x = 4.75, y = -0.575), color = cols[8], shape = 8)+
+  annotate("text",x = 4.85, y = -0.575,color = cols[8],label = "Environmental",size = 3.5,hjust = 0)+
+  theme(axis.title.y = element_text(margin = margin(t = 0, r = 26, b = 0, l = 15)))
+
+sdlog_all
+ggsave("../output/Fig6_CrossEnv_skew.png", width = 10, height = 5)
+```
+
+# FIGURE S10. Cross Environment Top 20%
+```{r}
+top20_all <- ggplot(ln_all, aes(x = Matrix, y = top20))+
+  geom_violin()+
+  geom_jitter(aes(shape = SubMatrix, color = Matrix))+
+  scale_color_manual(values = c(cols[1:4], cols[8]))+
+  scale_shape_manual(values = c(1,16,1,16,1,16,1,16,16,1,8))+
+  ylab(expression(paste("Proportion of activity by top cells")))+
+  xlab("Environment")+
+  guides(color = "none", shape = "none")+
+  geom_point(aes(x = 0.75, y = 0.175), color = cols[1], shape = 16)+
+  annotate("text", x = 0.85, y = 0.175, color = cols[1], label = "Coastal", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 0.75, y = 0.125), color = cols[1], shape = 1)+
+  annotate("text", x = 0.85, y = 0.125, color = cols[1],label = "Open", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 1.75, y = 0.175), color = cols[2], shape = 16)+
+  annotate("text", x = 1.85, y = 0.175, color = cols[2], label = "Hypoxic", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 1.75, y = 0.125), color = cols[2], shape = 1)+
+  annotate("text", x = 1.85, y = 0.125, color = cols[2],label = "Anoxic", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 2.75, y = 0.175), color = cols[3], shape = 16)+
+  annotate("text", x = 2.85, y = 0.175, color = cols[3], label = "Deep", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 2.75, y = 0.125), color = cols[3], shape = 1)+
+  annotate("text", x = 2.85, y = 0.125, color = cols[3], label = "Shallow",size = 3.5, hjust = 0)+
+  geom_point(aes(x = 3.75, y = 0.175), color = cols[4], shape = 16)+
+  annotate("text", x = 3.85, y = 0.175,color = cols[4],label = "Attached",size = 3.5, hjust = 0)+
+  geom_point(aes(x = 3.75, y = 0.125), color = cols[4], shape = 1)+
+  annotate("text", x = 3.85, y = 0.125,color = cols[4],label = "Unattached", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 4.75, y = 0.2), color = cols[8], shape = 16)+
+  annotate("text", x = 4.85, y = 0.2,color = cols[8], label = "Batch", size = 3.5, hjust = 0)+
+  geom_point(aes(x = 4.75, y = 0.15), color = cols[8], shape = 1)+
+  annotate("text", x = 4.85, y = 0.15,color = cols[8],label = "Continuous",size = 3.5,hjust = 0)+
+  geom_point(aes(x = 4.75, y = 0.1), color = cols[8], shape = 8)+
+  annotate("text",x = 4.85, y = 0.1,color = cols[8],label = "Environmental",size = 3.5,hjust = 0)+
+  theme(axis.title.y = element_text(margin = margin(t = 0, r = 26, b = 0, l = 15)))
+
+top20_all
+ggsave("../output/FigS10_CrossEnv_top20.png", width = 10, height = 5)
+```
+
+```{r}
+model <- lme4::lmer(data = ln_all, sdlog ~ Method + (1 | Matrix))
+summary(model)
+
+# Variance components
+vc <- VarCorr(model)
+tau2 <- vc$Matrix[1]
+sigma2 <- attr(vc, "sc")^2
+
+# Intraclass correlation coefficient
+icc <- tau2 / (tau2 + sigma2)
+
+
+model <- lme4::lmer(data = ln_all, sdlog ~ 1 + (1 | Matrix))
+summary(model)
+
+# Variance components
+vc <- VarCorr(model)
+tau2 <- vc$Matrix[1]
+sigma2 <- attr(vc, "sc")^2
+
+# Intraclass correlation coefficient
+icc <- tau2 / (tau2 + sigma2)
+
+model <- lme4::lmer(data = ln_all, top20 ~ 1 + (1 | Matrix))
+
+# Variance components
+vc <- VarCorr(model)
+tau2 <- vc$Matrix[1]
+sigma2 <- attr(vc, "sc")^2
+
+# Intraclass correlation coefficient
+icc <- tau2 / (tau2 + sigma2)
+
+```

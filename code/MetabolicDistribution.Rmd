@@ -1,0 +1,1257 @@
+---
+title: "Metabolic Inequality"
+author: "Emmi Mueller"
+date: "2026-04-21"
+output: pdf_document
+---
+
+```{r setup, echo=FALSE}
+rm(list=ls())
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.align = "center",
+  message = FALSE,
+  warning = FALSE,
+  tidy.opts = list(width.cutoff = 60),
+  tidy = TRUE)
+```
+
+```{r}
+library("BiocManager")
+library("vegan")
+library("fitdistrplus")
+library("ggplot2")
+library("car")
+library("actuar")
+library("scales")
+library("MoMAColors")
+library("bbmle")
+library("dplyr")
+library("mgcv")
+library("tidyr")
+library("cowplot")
+library("here")
+library("emmeans")
+#library("ggridges")
+library("rsq")
+# library("gdata")
+library("ggpmisc")
+# library("ggpp")
+# library("ggsignif")
+# library("Pareto")
+# library("spatstat")
+#library("aod")
+# library("stats")
+library("tidymv")
+# library("plot3D")
+# library("ggformula")
+# library("DescTools")
+# library("tibble")
+# library("ggpubr")
+library(multcompView)
+library(grDevices)
+library(truncnorm)
+
+#devtools::install_github("johannesbjork/LaCroixColoR")
+#library(LaCroixColoR)
+#BiocManager::install("flowCore")
+
+source("./MetDist_functions.R")
+source("./mothur_tools.R")
+
+```
+
+```{r figure_setup}
+my.cols <- RColorBrewer::brewer.pal(n = 4, name = "Greys")[3:4]
+
+# Set theme for figures in the paper
+theme_set(theme_classic() + 
+  theme(axis.title = element_text(size = 16),
+        axis.title.x = element_text(margin = margin(t = 15, b = 15)),
+        axis.title.y = element_text(margin = margin(l = 15, r = 15)),
+        axis.text = element_text(size = 13),
+        axis.text.x = element_text(margin = margin(t = 5)),
+        axis.text.y = element_text(margin = margin(r = 5)),
+        axis.line.x = element_blank(),
+        axis.line.y = element_blank(),
+        axis.ticks.x = element_line(linewidth = 1),
+        axis.ticks.y = element_line(linewidth = 1),
+        axis.ticks.length = unit(.1, "in"),
+        panel.border = element_rect(color = "grey20", fill = NA, linewidth = 1.5),
+        legend.text = element_text(size = 14),
+        strip.text = element_text(size = 14),
+        strip.background = element_blank()
+        ))
+```
+
+# FIGURE 1.Example Distributions
+```{r}
+bin_n <- 100
+
+# Uniform
+
+act <- data.frame("Act" = runif(5000, 0, 1e6))
+
+ggplot(data = act, aes(x = Act))+
+  geom_histogram(aes(y = ..density..), bins = bin_n)+
+  xlab("Metabolic activity")+
+  ylab("Density")+
+  scale_x_continuous(labels = scientific_10_nonlog)+
+  scale_y_continuous(labels = scientific_10_nonlog)+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(), axis.ticks.x = element_blank(), axis.ticks.y = element_blank())
+
+ggsave("../output/Fig1/Info_Uniform.png", width = 4, height = 3)
+
+# Bimodal
+act <- data.frame("Act" = c(rnorm(2500, 10^0.5, 10^3.5), rnorm(2500, 10^4.2, 10^3.5)))
+
+ggplot(data = act, aes(x = Act))+
+  geom_histogram(aes(y = ..density..), bins = bin_n)+
+  xlab("Metabolic activity")+
+  ylab("Density")+
+  scale_x_continuous(labels = scientific_10_nonlog)+
+  scale_y_continuous(labels = scientific_10_nonlog)+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(), axis.ticks.x = element_blank(), axis.ticks.y = element_blank())
+
+ggsave("../output/Fig1/Info_Bimodal.png", width = 4, height = 3)
+
+# Gaussian
+
+act <- data.frame("Act" = c(rnorm(5000, 10^4.2, 10^3.5)))
+
+ggplot(data = act, aes(x = Act))+
+  geom_histogram(aes(y = ..density..), bins = bin_n)+
+  xlab("Metabolic activity")+
+  ylab("Density")+
+  scale_x_continuous(labels = scientific_10_nonlog)+
+  scale_y_continuous(labels = scientific_10_nonlog)+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(), axis.ticks.x = element_blank(), axis.ticks.y = element_blank())
+
+ggsave("../output/Fig1/Info_Normal.png", width = 4, height = 3)
+
+
+# Pareto
+act <- data.frame("Act" = actuar::rpareto(5000, 10, 100000))
+
+ggplot(data = act, aes(x = Act))+
+  geom_histogram(aes(y = ..density..), bins = bin_n)+
+  xlab("Metabolic activity")+
+  ylab("Density")+
+  scale_x_continuous(labels = scientific_10_nonlog)+
+  scale_y_continuous(labels = scientific_10_nonlog)+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(), axis.ticks.x = element_blank(), axis.ticks.y = element_blank())
+
+ggsave("../output/Fig1/Info_Pareto.png", width = 4, height = 3)
+
+# Lognormal
+act <- data.frame("Act" = rlnorm(5000, sdlog = 0.6, meanlog = 9))
+
+ggplot(data = act, aes(x = Act))+
+  geom_histogram(aes(y = ..density..), bins = bin_n)+
+  xlab("Metabolic activity")+
+  ylab("Density")+
+  scale_x_continuous(labels = scientific_10_nonlog)+
+  scale_y_continuous(labels = scientific_10_nonlog)+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(), axis.ticks.x = element_blank(), axis.ticks.y = element_blank())
+
+ggsave("../output/Fig1/Info_Lognormal.png", width = 4, height = 3)
+
+# Gamma
+act <- data.frame("Act" = rgamma(5000, shape = 1.8, scale = 1e5))
+
+ggplot(data = act, aes(x = Act))+
+  geom_histogram(aes(y = ..density..), bins = bin_n)+
+  xlab("Metabolic activity")+
+  ylab("Density")+
+  scale_x_continuous(labels = scientific_10_nonlog)+
+  scale_y_continuous(labels = scientific_10_nonlog)+
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(), axis.ticks.x = element_blank(), axis.ticks.y = element_blank())
+
+ggsave("../output/Fig1/Info_Gamma.png", width = 4, height = 3)
+```
+
+# READ IN DATA
+
+## Read in fcs files and assign all RSG vectors to dataframes using flowCore
+### Continuous Culture
+```{r, warning = FALSE}
+MD_RTLC_S3 <- c("MD_RTLC_01_RSG"="2.875Ra.fcs", "MD_RTLC_02_RSG"="3.25Ra.fcs", "MD_RTLC_03_RSG"="3.875Ra.fcs", "MD_RTLC_04_RSG"="4.125Ra.fcs", "MD_RTLC_05_RSG"="4.375Ra.fcs", "MD_RTLC_06_RSG"="4.625Ra.fcs", "MD_RTLC_07_RSG"="4.875Ra.fcs", "MD_RTLC_08_RSG"="5.125Ra.fcs", "MD_RTLC_09_RSG" = "5.375Ra.fcs", "MD_RTLC_10_RSG" = "5.625Ra.fcs")
+
+for(key in names(MD_RTLC_S3)){
+    assign(key, process(here("data", "Freshwater", "Continuous_culture", "S3_M1gate", MD_RTLC_S3[key]), "B530-H", FALSE))
+}
+
+MD_RTLC_S2 <- c("MD_RTLC_11_RSG"="2.25.fcs", "MD_RTLC_12_RSG"="2.75.fcs", "MD_RTLC_13_RSG"="3.75.fcs", "MD_RTLC_14_RSG"="4.25.fcs", "MD_RTLC_15_RSG"="4.75.fcs", "MD_RTLC_16_RSG"="5.25.fcs", "MD_RTLC_17_RSG"="5.75.fcs", "MD_RTLC_18_RSG"="6.25.fcs", "MD_RTLC_19_RSG" = "6.75.fcs", "MD_RTLC_20_RSG" = "7.25.fcs", "MD_RTLC_21_RSG" = "7.75.fcs", "MD_RTLC_22_RSG" = "8.25.fcs")
+
+for(key in names(MD_RTLC_S2)){
+    assign(key, process(here("data", "Freshwater", "Continuous_culture", "S2_M1gate", MD_RTLC_S2[key]), "B530-H", FALSE))
+}
+
+MD_RTLC_S4 <- c("MD_RTLC_23_RSG"="1.5_Ra.fcs", "MD_RTLC_24_RSG"="1.75_Ra.fcs", "MD_RTLC_25_RSG"="2.375_Ra.fcs", "MD_RTLC_26_RSG"="3.375_Ra.fcs", "MD_RTLC_27_RSG"="3.625_Ra.fcs", "MD_RTLC_28_RSG"="5.875_Ra.fcs", "MD_RTLC_29_RSG"="6.125_Ra.fcs", "MD_RTLC_30_RSG"="6.375_Ra.fcs", "MD_RTLC_31_RSG" = "6.625_Ra.fcs", "MD_RTLC_32_RSG" = "6.875_Ra.fcs", "MD_RTLC_33_RSG" = "7.125_Ra.fcs", "MD_RTLC_34_RSG" = "7.375_Ra.fcs", "MD_RTLC_35_RSG" = "7.625_Ra.fcs", "MD_RTLC_36_RSG" = "7.875_Ra.fcs")
+
+for(key in names(MD_RTLC_S4)){
+    assign(key, process(here("data", "Freshwater", "Continuous_culture", "S4_M3gate", MD_RTLC_S4[key]), "B530-H", FALSE))
+}
+```
+
+### Environmental
+```{r}
+MD_ULRG_G3 <- c("MD_ULRG_01_A"="UL01A_RSG.fcs", "MD_ULRG_02_A"="UL02A_RSG.fcs", "MD_ULRG_03_A"="UL03A_RSG.fcs", "MD_ULRG_04_A"="UL04A_RSG.fcs", "MD_ULRG_05_A"="UL05A_RSG.fcs", "MD_ULRG_06_A"="UL06A_RSG.fcs", "MD_ULRG_07_A"="UL07A_RSG.fcs", "MD_ULRG_08_A"="UL08A_RSG.fcs", "MD_ULRG_09_A"="UL09A_RSG.fcs", "MD_ULRG_10_A"="UL10A_RSG.fcs", "MD_ULRG_11_A"="UL11A_RSG.fcs", "MD_ULRG_12_A"="UL12A_RSG.fcs", "MD_ULRG_13_A"="UL13A_RSG.fcs", "MD_ULRG_14_A"="UL14A_RSG.fcs", "MD_ULRG_01_B"="UL01B_RSG.fcs", "MD_ULRG_02_B"="UL02B_RSG.fcs", "MD_ULRG_03_B"="UL03B_RSG.fcs", "MD_ULRG_04_B"="UL04B_RSG.fcs", "MD_ULRG_05_B"="UL05B_RSG.fcs", "MD_ULRG_06_B"="UL06B_RSG.fcs", "MD_ULRG_07_B"="UL07B_RSG.fcs", "MD_ULRG_08_B"="UL08B_RSG.fcs", "MD_ULRG_09_B"="UL09B_RSG.fcs", "MD_ULRG_10_B"="UL10B_RSG.fcs", "MD_ULRG_11_B"="UL11B_RSG.fcs", "MD_ULRG_12_B"="UL12B_RSG.fcs", "MD_ULRG_13_B"="UL13B_RSG.fcs", "MD_ULRG_14_B"="UL14B_RSG.fcs")
+
+for(key in names(MD_ULRG_G3)){
+    assign(key, process(here("data", "Freshwater", "Environmental", "ULRG_RSG_R3Gate", MD_ULRG_G3[key]), "B530-H", FALSE))
+}
+```
+
+### Batch Culture
+```{r}
+MD_GSSF <- c("MD_GSSF_T1_A"="GSSF-G-T1-A-R.fcs", "MD_GSSF_T1_B"="GSSF-G-T1-B-R.fcs", "MD_GSSF_T1_C"="GSSF-G-T1-C-R.fcs", "MD_GSSF_T1_D"="GSSF-G-T1-D-R.fcs", "MD_GSSF_T1_E"="GSSF-G-T1-E-R.fcs", "MD_GSSF_T2_A"="GSSF-G-T2-A-R.fcs", "MD_GSSF_T2_B"="GSSF-G-T2-B-R.fcs", "MD_GSSF_T2_C"="GSSF-G-T2-C-R.fcs", "MD_GSSF_T2_D"="GSSF-G-T2-D-R.fcs", "MD_GSSF_T2_E"="GSSF-G-T2-E-R.fcs", "MD_GSSF_T3_A"="GSSF-G-T3-A-R.fcs", "MD_GSSF_T3_B"="GSSF-G-T3-B-R.fcs", "MD_GSSF_T3_C"="GSSF-G-T3-C-R.fcs", "MD_GSSF_T3_D"="GSSF-G-T3-D-R.fcs", "MD_GSSF_T3_E"="GSSF-G-T3-E-R.fcs", "MD_GSSF_T4_A"="GSSF-G-T4-A-R.fcs", "MD_GSSF_T4_B"="GSSF-G-T4-B-R.fcs", "MD_GSSF_T4_C"="GSSF-G-T4-C-R.fcs", "MD_GSSF_T4_D"="GSSF-G-T4-D-R.fcs", "MD_GSSF_T4_E"="GSSF-G-T4-E-R.fcs", "MD_GSSF_T5_A"="GSSF-G-T5-A-R.fcs", "MD_GSSF_T5_B"="GSSF-G-T5-B-R.fcs", "MD_GSSF_T5_C"="GSSF-G-T5-C-R.fcs", "MD_GSSF_T5_D"="GSSF-G-T5-D-R.fcs", "MD_GSSF_T5_E"="GSSF-G-T5-E-R.fcs", "MD_GSSF_T6_A"="GSSF-G-T6-A-R.fcs", "MD_GSSF_T6_B"="GSSF-G-T6-B-R.fcs", "MD_GSSF_T6_C"="GSSF-G-T6-C-R.fcs", "MD_GSSF_T6_D"="GSSF-G-T6-D-R.fcs", "MD_GSSF_T6_E"="GSSF-G-T6-E-R.fcs", "MD_GSSF_T7_A"="GSSF-G-T7-A-R.fcs", "MD_GSSF_T7_B"="GSSF-G-T7-B-R.fcs", "MD_GSSF_T7_C"="GSSF-G-T7-C-R.fcs", "MD_GSSF_T7_D"="GSSF-G-T7-D-R.fcs", "MD_GSSF_T7_E"="GSSF-G-T7-E-R.fcs", "MD_GSSF_T8_A"="GSSF-G-T8-A-R.fcs", "MD_GSSF_T8_B"="GSSF-G-T8-B-R.fcs", "MD_GSSF_T8_C"="GSSF-G-T8-C-R.fcs", "MD_GSSF_T8_D"="GSSF-G-T8-D-R.fcs", "MD_GSSF_T8_E"="GSSF-G-T8-E-R.fcs", "MD_GSSF_T9_A"="GSSF-G-T9-A-R.fcs", "MD_GSSF_T9_B"="GSSF-G-T9-B-R.fcs", "MD_GSSF_T9_C"="GSSF-G-T9-C-R.fcs", "MD_GSSF_T9_D"="GSSF-G-T9-D-R.fcs", "MD_GSSF_T9_E"="GSSF-G-T9-E-R.fcs", "MD_GSSF_T10_A"="GSSF-G-T10-A-R.fcs", "MD_GSSF_T10_B"="GSSF-G-T10-B-R.fcs", "MD_GSSF_T10_C"="GSSF-G-T10-C-R.fcs", "MD_GSSF_T10_D"="GSSF-G-T10-D-R.fcs", "MD_GSSF_T10_E"="GSSF-G-T10-E-R.fcs")
+
+for(key in names(MD_GSSF)){
+    assign(key, process(here("data", "Freshwater", "Batch_culture", "GSSF-G-FCS", MD_GSSF[key]), "B530-H", FALSE))
+}
+```
+
+
+## Assign all samples to subgroups based on experiment
+```{r}
+#All
+
+met_all <- list(MD_RTLC_01_RSG, MD_RTLC_02_RSG, MD_RTLC_03_RSG, MD_RTLC_04_RSG, MD_RTLC_05_RSG, MD_RTLC_06_RSG, MD_RTLC_07_RSG, MD_RTLC_08_RSG, MD_RTLC_09_RSG, MD_RTLC_10_RSG, MD_RTLC_11_RSG, MD_RTLC_12_RSG, MD_RTLC_13_RSG, MD_RTLC_14_RSG, MD_RTLC_15_RSG, MD_RTLC_16_RSG, MD_RTLC_17_RSG, MD_RTLC_18_RSG, MD_RTLC_19_RSG, MD_RTLC_20_RSG, MD_RTLC_21_RSG, MD_RTLC_22_RSG, MD_RTLC_23_RSG, MD_RTLC_24_RSG, MD_RTLC_25_RSG, MD_RTLC_26_RSG, MD_RTLC_27_RSG, MD_RTLC_28_RSG, MD_RTLC_29_RSG, MD_RTLC_30_RSG, MD_RTLC_31_RSG, MD_RTLC_32_RSG, MD_RTLC_33_RSG, MD_RTLC_34_RSG, MD_RTLC_35_RSG, MD_RTLC_36_RSG, MD_ULRG_01_A, MD_ULRG_02_A, MD_ULRG_03_A, MD_ULRG_04_A, MD_ULRG_05_A, MD_ULRG_06_A, MD_ULRG_07_A, MD_ULRG_08_A, MD_ULRG_09_A, MD_ULRG_10_A, MD_ULRG_11_A, MD_ULRG_12_A, MD_ULRG_13_A, MD_ULRG_14_A, MD_ULRG_01_B, MD_ULRG_02_B, MD_ULRG_03_B, MD_ULRG_04_B, MD_ULRG_05_B, MD_ULRG_06_B, MD_ULRG_07_B, MD_ULRG_08_B, MD_ULRG_09_B, MD_ULRG_10_B, MD_ULRG_11_B, MD_ULRG_12_B, MD_ULRG_13_B, MD_ULRG_14_B,  MD_GSSF_T1_A, MD_GSSF_T1_B, MD_GSSF_T1_C, MD_GSSF_T1_D, MD_GSSF_T1_E, MD_GSSF_T2_A, MD_GSSF_T2_B, MD_GSSF_T2_C, MD_GSSF_T2_D, MD_GSSF_T2_E, MD_GSSF_T3_A, MD_GSSF_T3_B, MD_GSSF_T3_C, MD_GSSF_T3_D, MD_GSSF_T3_E, MD_GSSF_T4_A, MD_GSSF_T4_B, MD_GSSF_T4_C, MD_GSSF_T4_D, MD_GSSF_T4_E, MD_GSSF_T5_A, MD_GSSF_T5_B, MD_GSSF_T5_C, MD_GSSF_T5_D, MD_GSSF_T5_E, MD_GSSF_T6_A, MD_GSSF_T6_B, MD_GSSF_T6_C, MD_GSSF_T6_D, MD_GSSF_T6_E, MD_GSSF_T7_A, MD_GSSF_T7_B, MD_GSSF_T7_C, MD_GSSF_T7_D, MD_GSSF_T7_E, MD_GSSF_T8_A, MD_GSSF_T8_B,  MD_GSSF_T8_C, MD_GSSF_T8_D, MD_GSSF_T8_E, MD_GSSF_T9_A, MD_GSSF_T9_B, MD_GSSF_T9_C, MD_GSSF_T9_D, MD_GSSF_T9_E, MD_GSSF_T10_A, MD_GSSF_T10_B, MD_GSSF_T10_C, MD_GSSF_T10_D, MD_GSSF_T10_E)
+
+samples_all <- c("MD_RTLC_01", "MD_RTLC_02", "MD_RTLC_03", "MD_RTLC_04", "MD_RTLC_05", "MD_RTLC_06", "MD_RTLC_07", "MD_RTLC_08", "MD_RTLC_09", "MD_RTLC_10", "MD_RTLC_11", "MD_RTLC_12", "MD_RTLC_13", "MD_RTLC_14", "MD_RTLC_15", "MD_RTLC_16", "MD_RTLC_17", "MD_RTLC_18", "MD_RTLC_19", "MD_RTLC_20", "MD_RTLC_21", "MD_RTLC_22", "MD_RTLC_23", "MD_RTLC_24", "MD_RTLC_25", "MD_RTLC_26", "MD_RTLC_27", "MD_RTLC_28", "MD_RTLC_29", "MD_RTLC_30", "MD_RTLC_31", "MD_RTLC_32", "MD_RTLC_33", "MD_RTLC_34", "MD_RTLC_35", "MD_RTLC_36", "MD_UL_01_A", "MD_UL_02_A", "MD_UL_03_A", "MD_UL_04_A", "MD_UL_05_A", "MD_UL_06_A", "MD_UL_07_A", "MD_UL_08_A", "MD_UL_09_A", "MD_UL_10_A", "MD_UL_11_A", "MD_UL_12_A", "MD_UL_13_A", "MD_UL_14_A","MD_UL_01_B", "MD_UL_02_B", "MD_UL_03_B", "MD_UL_04_B", "MD_UL_05_B", "MD_UL_06_B", "MD_UL_07_B", "MD_UL_08_B", "MD_UL_09_B", "MD_UL_10_B", "MD_UL_11_B", "MD_UL_12_B", "MD_UL_13_B", "MD_UL_14_B", "MD_GSSF_T1_A", "MD_GSSF_T1_B", "MD_GSSF_T1_C", "MD_GSSF_T1_D", "MD_GSSF_T1_E", "MD_GSSF_T2_A", "MD_GSSF_T2_B", "MD_GSSF_T2_C", "MD_GSSF_T2_D", "MD_GSSF_T2_E", "MD_GSSF_T3_A", "MD_GSSF_T3_B", "MD_GSSF_T3_C", "MD_GSSF_T3_D", "MD_GSSF_T3_E", "MD_GSSF_T4_A", "MD_GSSF_T4_B", "MD_GSSF_T4_C", "MD_GSSF_T4_D", "MD_GSSF_T4_E", "MD_GSSF_T5_A", "MD_GSSF_T5_B", "MD_GSSF_T5_C", "MD_GSSF_T5_D", "MD_GSSF_T5_E", "MD_GSSF_T6_A", "MD_GSSF_T6_B", "MD_GSSF_T6_C", "MD_GSSF_T6_D", "MD_GSSF_T6_E", "MD_GSSF_T7_A", "MD_GSSF_T7_B", "MD_GSSF_T7_C", "MD_GSSF_T7_D", "MD_GSSF_T7_E", "MD_GSSF_T8_A", "MD_GSSF_T8_B", "MD_GSSF_T8_C",  "MD_GSSF_T8_D", "MD_GSSF_T8_E", "MD_GSSF_T9_A", "MD_GSSF_T9_B", "MD_GSSF_T9_C", "MD_GSSF_T9_D", "MD_GSSF_T9_E", "MD_GSSF_T10_A", "MD_GSSF_T10_B", "MD_GSSF_T10_C", "MD_GSSF_T10_D", "MD_GSSF_T10_E")
+
+#RTLC
+
+# met_RTLC <- list(MD_RTLC_01_RSG, MD_RTLC_02_RSG, MD_RTLC_03_RSG, MD_RTLC_04_RSG, MD_RTLC_05_RSG, MD_RTLC_06_RSG, MD_RTLC_07_RSG, MD_RTLC_08_RSG, MD_RTLC_09_RSG, MD_RTLC_10_RSG, MD_RTLC_11_RSG, MD_RTLC_12_RSG, MD_RTLC_13_RSG, MD_RTLC_14_RSG, MD_RTLC_15_RSG, MD_RTLC_16_RSG, MD_RTLC_17_RSG, MD_RTLC_18_RSG, MD_RTLC_19_RSG, MD_RTLC_20_RSG, MD_RTLC_21_RSG, MD_RTLC_22_RSG, MD_RTLC_23_RSG, MD_RTLC_24_RSG, MD_RTLC_25_RSG, MD_RTLC_26_RSG, MD_RTLC_27_RSG, MD_RTLC_28_RSG, MD_RTLC_29_RSG, MD_RTLC_30_RSG, MD_RTLC_31_RSG, MD_RTLC_32_RSG, MD_RTLC_33_RSG, MD_RTLC_34_RSG, MD_RTLC_35_RSG, MD_RTLC_36_RSG)
+# 
+# samples_RTLC <- c("MD_RTLC_01", "MD_RTLC_02", "MD_RTLC_03", "MD_RTLC_04", "MD_RTLC_05", "MD_RTLC_06", "MD_RTLC_07", "MD_RTLC_08", "MD_RTLC_09", "MD_RTLC_10", "MD_RTLC_11", "MD_RTLC_12", "MD_RTLC_13", "MD_RTLC_14", "MD_RTLC_15", "MD_RTLC_16", "MD_RTLC_17", "MD_RTLC_18", "MD_RTLC_19", "MD_RTLC_20", "MD_RTLC_21", "MD_RTLC_22", "MD_RTLC_23", "MD_RTLC_24", "MD_RTLC_25", "MD_RTLC_26", "MD_RTLC_27", "MD_RTLC_28", "MD_RTLC_29", "MD_RTLC_30", "MD_RTLC_31", "MD_RTLC_32", "MD_RTLC_33", "MD_RTLC_34", "MD_RTLC_35", "MD_RTLC_36")
+# 
+# #ULRG
+# 
+# met_ULRG <- list(MD_ULRG_01_A, MD_ULRG_02_A, MD_ULRG_03_A, MD_ULRG_04_A, MD_ULRG_05_A, MD_ULRG_06_A, MD_ULRG_07_A, MD_ULRG_08_A, MD_ULRG_09_A, MD_ULRG_10_A, MD_ULRG_11_A, MD_ULRG_12_A, MD_ULRG_13_A, MD_ULRG_14_A, MD_ULRG_01_B, MD_ULRG_02_B, MD_ULRG_03_B, MD_ULRG_04_B, MD_ULRG_05_B, MD_ULRG_06_B, MD_ULRG_07_B, MD_ULRG_08_B, MD_ULRG_09_B, MD_ULRG_10_B, MD_ULRG_11_B, MD_ULRG_12_B, MD_ULRG_13_B, MD_ULRG_14_B)
+# 
+# samples_ULRG <- c("MD_UL_01_A", "MD_UL_02_A", "MD_UL_03_A", "MD_UL_04_A", "MD_UL_05_A", "MD_UL_06_A", "MD_UL_07_A", "MD_UL_08_A", "MD_UL_09_A", "MD_UL_10_A", "MD_UL_11_A", "MD_UL_12_A", "MD_UL_13_A", "MD_UL_14_A","MD_UL_01_B", "MD_UL_02_B", "MD_UL_03_B", "MD_UL_04_B", "MD_UL_05_B", "MD_UL_06_B", "MD_UL_07_B", "MD_UL_08_B", "MD_UL_09_B", "MD_UL_10_B", "MD_UL_11_B", "MD_UL_12_B", "MD_UL_13_B", "MD_UL_14_B")
+# 
+# #GSSF
+# 
+# met_GSSF <- list(MD_GSSF_T1_A, MD_GSSF_T1_B, MD_GSSF_T1_C, MD_GSSF_T1_D, MD_GSSF_T1_E, MD_GSSF_T2_A, MD_GSSF_T2_B, MD_GSSF_T2_C, MD_GSSF_T2_D, MD_GSSF_T2_E, MD_GSSF_T3_A, MD_GSSF_T3_B, MD_GSSF_T3_C, MD_GSSF_T3_D, MD_GSSF_T3_E, MD_GSSF_T4_A, MD_GSSF_T4_B, MD_GSSF_T4_C, MD_GSSF_T4_D, MD_GSSF_T4_E, MD_GSSF_T5_A, MD_GSSF_T5_B, MD_GSSF_T5_C, MD_GSSF_T5_D, MD_GSSF_T5_E, MD_GSSF_T6_A, MD_GSSF_T6_B, MD_GSSF_T6_C, MD_GSSF_T6_D, MD_GSSF_T6_E, MD_GSSF_T7_A, MD_GSSF_T7_B, MD_GSSF_T7_C, MD_GSSF_T7_D, MD_GSSF_T7_E, MD_GSSF_T8_A, MD_GSSF_T8_B, MD_GSSF_T8_C, MD_GSSF_T8_D, MD_GSSF_T8_E, MD_GSSF_T9_A, MD_GSSF_T9_B, MD_GSSF_T9_C, MD_GSSF_T9_D, MD_GSSF_T9_E, MD_GSSF_T10_A, MD_GSSF_T10_B, MD_GSSF_T10_C, MD_GSSF_T10_D, MD_GSSF_T10_E)
+# 
+# samples_GSSF <- c("MD_GSSF_T1_A", "MD_GSSF_T1_B", "MD_GSSF_T1_C", "MD_GSSF_T1_D", "MD_GSSF_T1_E", "MD_GSSF_T2_A", "MD_GSSF_T2_B", "MD_GSSF_T2_C", "MD_GSSF_T2_D", "MD_GSSF_T2_E", "MD_GSSF_T3_A", "MD_GSSF_T3_B", "MD_GSSF_T3_C", "MD_GSSF_T3_D", "MD_GSSF_T3_E", "MD_GSSF_T4_A", "MD_GSSF_T4_B", "MD_GSSF_T4_C", "MD_GSSF_T4_D", "MD_GSSF_T4_E", "MD_GSSF_T5_A", "MD_GSSF_T5_B", "MD_GSSF_T5_C", "MD_GSSF_T5_D", "MD_GSSF_T5_E", "MD_GSSF_T6_A", "MD_GSSF_T6_B", "MD_GSSF_T6_C", "MD_GSSF_T6_D", "MD_GSSF_T6_E", "MD_GSSF_T7_A", "MD_GSSF_T7_B", "MD_GSSF_T7_C", "MD_GSSF_T7_D", "MD_GSSF_T7_E", "MD_GSSF_T8_A", "MD_GSSF_T8_B","MD_GSSF_T8_C", "MD_GSSF_T8_D", "MD_GSSF_T8_E", "MD_GSSF_T9_A", "MD_GSSF_T9_B", "MD_GSSF_T9_C", "MD_GSSF_T9_D", "MD_GSSF_T9_E", "MD_GSSF_T10_A", "MD_GSSF_T10_B", "MD_GSSF_T10_C", "MD_GSSF_T10_D", "MD_GSSF_T10_E")
+
+cols <- c("#c8ad35","#1e4858","#ba4365", "#32bfab", "#8daab7", "#c790ae", "#8A9A5B","#59633B")
+set.seed(47405)
+```
+
+## Generate metadata dataframe
+```{r}
+Samples <- read.csv(here("data", "Freshwater", "MetDist_Samples.csv"))
+GSSF_G <- read.csv(here("data", "Freshwater", "Batch_culture", "GSSF-G.csv"), header = TRUE)
+print("BP Efficiency:")
+Samples <- as.data.frame(BP_fxn(read.csv(here("data", "Freshwater", "Continuous_culture", "RTLC_BP.csv"), header = FALSE), Samples, "RTLC"))
+Samples <- as.data.frame(BP_fxn(read.csv(here("data", "Freshwater", "Environmental", "20210825_ULRG_BP.csv"), header = FALSE), Samples, "ULRG"))
+Samples <- subset(Samples, select = -c(DPM, DPMKills, molLeu, molLeuLhr, gCLhr))
+
+met_samples <- rbind(subset(Samples, Samples$Set == "RTLC"), subset(Samples, Samples$Set == "ULRG"), subset(Samples, Samples$Set == "ULRG"), subset(Samples, Samples$Set == "GSSF"))
+met_samples$Sample <- samples_all
+met_samples$Tau <- log((10^met_samples$Tau)/60, 10)
+
+met_samples$Lake_rep <- c(rep(NA, 64), rep(c("A", "B", "C", "D", "E"), 10))
+met_samples$Time <- c(rep(NA, 64), GSSF_G$Mins)
+met_samples$Hours <- c(rep(NA, 64), GSSF_G$Mins/60)
+met_samples$OD600 <- c(rep(NA, 64), GSSF_G$OD)
+
+top20 <- c()
+for(met1 in met_all){
+  quantile_cutoff <- quantile(met1$RSG_ab, 0.8)
+  total_activity <- sum(met1$RSG_ab)
+  top20_activity <- sum(met1[met1 > quantile_cutoff])
+  top20_fraction <- top20_activity/total_activity
+  top20 <- c(top20, top20_fraction)
+}
+
+met_samples$top20 <- top20
+
+met_samples$phase_set <- ifelse(is.na(met_samples$Time), 0, met_samples$Time)
+
+met_samples$Phase <- rep(0, nrow(met_samples))
+met_samples$Phase <- met_samples$Phase + ((met_samples$Time > 500) *1)
+met_samples$Phase <- met_samples$Phase + ((met_samples$Time > 800) * 1)
+
+met_samples$Phase <- as.factor(met_samples$Phase)
+
+met_samples$DF <- log(1/(10^met_samples$Tau), 10)
+```
+# FIGURE 2. Top 20% of cells freshwater 
+```{r}
+met_samples$Set <- factor(met_samples$Set, c("GSSF", "ULRG", "RTLC"))
+levels(met_samples$Set)
+
+Fig2 <- ggplot(met_samples, aes(x = Set, y = top20))+
+  geom_violin()+
+  geom_jitter(aes(color = Set))+
+  scale_x_discrete(labels = c("Batch", "Environmental", "Continuous"))+
+  scale_color_manual(values = c(cols[6], cols[7], cols[5]))+
+  ylab(expression(paste("Proportion of activity by top cells")))+
+  xlab("Growth condition")+
+  guides(color = "none")
+
+Fig2
+
+ggsave("../output/Fig2_Freshwater_top20.png", width = 5, height = 5)
+```
+
+#FIGURE 3. Batch Culture Growth Curve
+## Generate growth curve for batch culture
+```{r}
+GSSF_GC <- read.csv(here("data", "Freshwater", "Batch_culture", "20231018_GSSF_GC.csv"), header = TRUE)
+GSSF_all <- data.frame("Lake" = NA, "Sample" = NA, "Code" = NA, "Time" = NA, "Minutes"= NA, "OD600" = NA)
+GC_sum <- data.frame("Sample"=NA, "lag" = NA, "umax" = NA, "yield" = NA, "phi1" = NA, "phi2" = NA, "phi3" = NA)
+
+
+for(lake in c("A", "B", "C", "D", "E")){
+  GSSF_GC_G <- subset(GSSF_GC, GSSF_GC$Lake == "Goodman" & GSSF_GC$Sample == lake)
+  #fit logistic growth model to growth curve for OD600
+  coef(lm(logit(GSSF_GC_G$OD600/1.3)~GSSF_GC_G$Minutes))
+  growthcurve_OD<-nls(GSSF_GC_G$OD600~phi1/(1+exp(-(phi2+(phi3*GSSF_GC_G$Minutes)))),
+   start=list(phi1=1.3,phi2=-5.47,phi3=0.008), data = GSSF_GC_G)
+  phi1_OD<-coef(growthcurve_OD)[1]
+  phi2_OD<-coef(growthcurve_OD)[2]
+  phi3_OD<-coef(growthcurve_OD)[3]
+  x<-c(min(GSSF_GC_G$Minutes):1100)
+  y<-phi1_OD/(1+exp(-(phi2_OD+phi3_OD*x)))
+  predict_OD600<-data.frame(x,y)
+  
+  OD600 <- function(x) (phi1_OD/(1+exp(-(phi2_OD+phi3_OD*x))))
+  curve(OD600, 0, max(GSSF_GC_G$Minutes), ylab = "OD600=f(minutes)")
+  deriv_OD600 <- function(x) {}
+  body(deriv_OD600) <- D(body(OD600), 'x')
+  curve(deriv_OD600, 0, max(GSSF_GC_G$Minutes), ylab = "f'(minutes)")
+  deriv <- deriv_OD600(subset(GSSF_GC_G, GSSF_GC_G$Minutes != 0 & GSSF_GC_G$Minutes != 370)$Minutes)
+  
+  GSSF_GC_deriv <-data.frame("SGR" = deriv, "OD600" = subset(GSSF_GC_G, GSSF_GC_G$Minutes != 0 & GSSF_GC_G$Minutes != 370)$OD600,"Sample" = subset(GSSF_GC_G, GSSF_GC_G$Minutes != 0 & GSSF_GC_G$Minutes != 370)$Sample)
+  colnames(GSSF_GC_deriv) <- c("SGR", "OD600", "Sample")
+  GSSF_all <- rbind(GSSF_all, GSSF_GC_G)
+  
+  tan_m <- max(GSSF_GC_deriv$SGR)
+  tan_y <- subset(GSSF_GC_deriv, GSSF_GC_deriv$SGR == tan_m)$OD600
+  tan_x <- subset(GSSF_GC, GSSF_GC$Lake == "Goodman" & GSSF_GC$Sample == lake & GSSF_GC$OD600 == tan_y)$Minutes
+  tan_b <- tan_y - (tan_x * tan_m)
+  lag <- (min(GSSF_GC_deriv$OD600) - tan_b)/tan_m
+  yield <- max(GSSF_GC_deriv$OD600) - min(GSSF_GC_deriv$OD600)
+  
+  GC_sum <- rbind(GC_sum, c(lake, lag, tan_m, yield, phi1_OD, phi2_OD, phi3_OD))
+  colnames(GC_sum) <- c("Sample", "lag", "umax", "yield", "phi1", "phi2", "phi3")
+
+}
+
+GC_sum <- GC_sum[-1,]
+print(paste("Lag :", mean(as.numeric(GC_sum$lag)), ", ", (sd(GC_sum$lag)/sqrt(5))))
+print(paste("umax :", mean(as.numeric(GC_sum$umax)), ", ", (sd(GC_sum$umax)/sqrt(5))))
+print(paste("Yield :", mean(as.numeric(GC_sum$yield)), ", ", (sd(GC_sum$yield)/sqrt(5))))
+print(paste("Phi1 :", mean(as.numeric(GC_sum$phi1)), ", ", (sd(GC_sum$phi1)/sqrt(5))))
+print(paste("Phi2 :", mean(as.numeric(GC_sum$phi2)), ", ", (sd(GC_sum$phi2)/sqrt(5))))
+print(paste("Phi3 :", mean(as.numeric(GC_sum$phi3)), ", ", (sd(GC_sum$phi3)/sqrt(5))))
+
+GSSF_all <- subset(GSSF_all, !(GSSF_all$Minutes %in% c(0, 370)))[-1,]
+
+GSSF_all$Hours <- GSSF_all$Minutes/60
+
+GSSF_GC_plot <- ggplot(data = predict_OD600, aes(x = x, y = y))+
+  geom_line(cex = 1.25, color = alpha("grey30", 0.3))+
+  geom_point(data = subset(GSSF_GC, GSSF_GC$Lake == "Goodman" & GSSF_GC$Minutes < 3000), aes(x = Minutes, y = OD600), cex = 1.5, color = "black")+
+  geom_point(data = subset(GSSF_GC,  GSSF_GC$Lake == "Goodman" & GSSF_GC$Minutes == 260 & GSSF_GC$Sample == "E"), aes(x = Minutes, y = OD600), color = cols[6], cex = 3)+
+    geom_point(data = subset(GSSF_GC,  GSSF_GC$Lake == "Goodman" & GSSF_GC$Minutes == 585 & GSSF_GC$Sample == "A"), aes(x = Minutes, y = OD600), color = cols[6], cex = 3)+
+    geom_point(data = subset(GSSF_GC,  GSSF_GC$Lake == "Goodman" & GSSF_GC$Minutes == 810 & GSSF_GC$Sample == "E"), aes(x = Minutes, y = OD600), color = cols[6], cex = 3)+
+  ylab(parse(text = "Biomass~(OD[600])"))+
+  xlab("Time (min)")
+
+GSSF_GC_plot
+```
+
+## Generate lag,log,stationary distributions
+```{r}
+mean(MD_GSSF_T1_A[,"RSG_ab"])
+median(MD_GSSF_T1_A[,"RSG_ab"])
+max(MD_GSSF_T1_A[,"RSG_ab"])
+
+sum(MD_GSSF_T1_A$RSG_ab > 1000)/length(MD_GSSF_T1_A$RSG_ab)
+
+GSSF_lag_hist <- hist(log(MD_GSSF_T1_A[,"RSG_ab"], 10), freq = FALSE, breaks = 100)
+GSSF_lag_hist$counts
+GSSF_lag <- data.frame("breaks" = GSSF_lag_hist$breaks[-1]-0.025, "density" = GSSF_lag_hist$density, "real" = ifelse(GSSF_lag_hist$counts > 0, -0.1, 0))
+
+
+GSSF_lag_plot <- ggplot()+
+  geom_bar(data = GSSF_lag, aes(x = breaks, y = density), stat = "identity", fill= cols[6], width = 0.05)+
+  geom_bar(data = GSSF_lag, aes(x = breaks-0.025, y = real), stat = "identity", fill= "#FFCFEB", width = 0.05)+
+  geom_bar(data = GSSF_lag, aes(x = breaks+0.025, y = real), stat = "identity", fill= "#FFCFEB", width = 0.05)+
+  scale_x_continuous(labels = label_math(10^.x))+
+  coord_cartesian(xlim = c(2.5, 7), ylim = c(-0.1, 3.25))+
+  xlab("Metabolic activity")+
+  ylab("Density")
+
+GSSF_lag_plot
+
+
+max(MD_GSSF_T4_E[,"RSG_ab"])
+mean(MD_GSSF_T4_E[,"RSG_ab"])
+median(MD_GSSF_T4_E[,"RSG_ab"])
+
+GSSF_log_hist <- hist(log(MD_GSSF_T4_E[,"RSG_ab"], 10), freq = FALSE, breaks = 100)
+GSSF_log <- data.frame("breaks" = GSSF_log_hist$breaks[-1]-0.025, "counts" = GSSF_log_hist$counts, "density" = GSSF_log_hist$density, "real" = ifelse(GSSF_log_hist$counts > 0, -0.1, 0))
+
+GSSF_log_plot <- ggplot()+
+  geom_bar(data = GSSF_log, aes(x = breaks, y = density), stat = "identity", fill= cols[6], width = 0.05)+
+  geom_bar(data = GSSF_log, aes(x = breaks-0.025, y = real), stat = "identity", fill= "#FFCFEB", width = 0.05)+
+  geom_bar(data = GSSF_log, aes(x = breaks+0.025, y = real), stat = "identity", fill= "#FFCFEB", width = 0.05)+
+  scale_x_continuous(labels = label_math(10^.x))+
+  coord_cartesian(xlim = c(2.5, 7), ylim = c(-0.1, 3.25))+
+  xlab("Metabolic activity")+
+  ylab("Density")
+
+GSSF_log_plot
+
+
+max(MD_GSSF_T9_A[,"RSG_ab"])
+mean(MD_GSSF_T9_A[,"RSG_ab"])
+median(MD_GSSF_T9_A[,"RSG_ab"])
+
+GSSF_stat_hist <- hist(log(MD_GSSF_T9_A[,"RSG_ab"], 10), freq = FALSE, breaks = 100)
+GSSF_stat <- data.frame("breaks" = GSSF_stat_hist$breaks[-1]-0.025, "density" = GSSF_stat_hist$density, "real" = ifelse(GSSF_stat_hist$counts > 0, -0.1, 0))
+
+GSSF_stat_plot <- ggplot()+
+    geom_bar(data = GSSF_stat, aes(x = breaks, y = density), stat = "identity", fill= cols[6], width = 0.05)+
+  geom_bar(data = GSSF_stat, aes(x = breaks-0.025, y = real), stat = "identity", fill= "#FFCFEB", width = 0.05)+
+  geom_bar(data = GSSF_stat, aes(x = breaks+0.025, y = real), stat = "identity", fill= "#FFCFEB", width = 0.05)+
+  scale_x_continuous(labels = label_math(10^.x))+
+  coord_cartesian(xlim = c(2.5, 7), ylim = c(-0.1, 3.25))+
+  xlab("Metabolic activity")+
+  ylab("Density")
+
+GSSF_stat_plot
+```
+
+## Plot altogether
+```{r}
+Fig3_GrowthCurve <- ggdraw()+
+  draw_plot(GSSF_GC_plot, x = 0.15, y = 0.4, width = 0.7, height = 0.6) +
+  draw_plot(GSSF_lag_plot, x = 0, y = 0, width = 0.37, height = 0.415)+
+  draw_plot(GSSF_log_plot + theme(axis.text.y = element_blank(), axis.title.y = element_blank()), x = 0.37, y = 0, width = 0.31, height = 0.415)+
+  draw_plot(GSSF_stat_plot + theme(axis.text.y = element_blank(), axis.title.y = element_blank()), x = 0.68, y = 0, width = 0.31, height = 0.415)+
+  draw_line(
+   x = c(0.08, 0.405),
+   y = c(0.405, 0.551),
+   color = alpha(cols[6],0.65), size = 1.5
+  )+
+  draw_line(
+  x = c(0.363, 0.405),
+  y = c(0.405, 0.551),
+  color = alpha(cols[6],0.65), size = 1.5
+  )+
+  draw_line(
+  x = c(0.385, 0.563),
+  y = c(0.405, 0.709),
+  color = alpha(cols[6],0.65), size = 1.5
+  )+
+  draw_line(
+  x = c(0.673, 0.563),
+  y = c(0.405, 0.709),
+  color = alpha(cols[6],0.65), size = 1.5
+  )+
+  draw_line(
+  x = c(0.695, 0.672),
+  y = c(0.405, 0.91),
+  color = alpha(cols[6],0.65), size = 1.5
+  )+
+  draw_line(
+  x = c(0.983, 0.672),
+  y = c(0.405, 0.91),
+  color = alpha(cols[6],0.65), size = 1.5
+  )+
+  draw_plot_label("text", label = "0", size = 13, color = "grey30", x = 0.2767, y = 0.5168, fontface = "plain")+
+  theme(plot.background = element_rect(fill="white", color = NA))+
+  draw_plot_label(label = c("(a)", "(b)", "(c)", "(d)"), size = 20, x=c(0.25, 0.11, 0.4, 0.7), y = c(0.99, 0.4, 0.4, 0.4))
+
+Fig3_GrowthCurve
+
+ggsave("../output/Fig3_GrowthCurve.png", height = 8, width = 12)
+```
+
+# FIGURE 4. QQ-plots for Lognormal, Gamma, Gaussian, Pareto
+
+## Gamma fits
+```{r}
+metn <- 1
+g_fits <- data.frame("Sample" = NA, "Set" = NA, "RSG_ab" = NA, "qgamma" = NA)
+g_param <- data.frame("Sample" = NA, "shape" = NA, "scale" = NA, "AIC_g" = NA, "BIC_g" = NA, "lL_g" = NA, "R2_g" = NA)
+for(met1 in met_all){
+  met_sub <- met1
+  nll_g <- function(shape, scale) {
+    -sum(dgamma((met_sub[,"RSG_ab"]), shape = shape, scale = scale, log = TRUE))
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_g,
+    start = list(shape = 1, scale = 10),
+    lower = c(0.001, 0.001),
+    upper = c(Inf, Inf),
+    method = "L-BFGS-B"
+  )
+  #print(samples_all[metn])
+#  print(summary(mle_fit))
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  qgamma <- qgamma(e_cdf, shape = coef(mle_fit)[1], scale = coef(mle_fit)[2])
+  
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ pgamma(met_sub[,"RSG_ab"], shape = coef(mle_fit)[1], scale = coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])),rep(met_samples[metn, "Set"], length(met_sub[,"RSG_ab"])),  met_sub, qgamma)
+  colnames(fit) <- c("Sample", "Set", "RSG_ab", "qgamma")
+  g_param <- rbind(g_param, data.frame("Sample" = samples_all[metn], "shape" = coef(mle_fit)[1], "scale" = coef(mle_fit)[2], "AIC_g" = AIC(mle_fit), "BIC_g" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_g" = logLik(mle_fit), "R2_g" = R2))
+  g_fits <- rbind(g_fits, fit)
+  
+  metn <- metn + 1
+}
+
+g_fits <- g_fits[-1,]
+g_fits <- subset(g_fits, g_fits$qgamma != "Inf")
+g_param <- g_param[-1,]
+
+met_samples <- cbind(met_samples, g_param[,c("shape", "scale", "AIC_g", "BIC_g", "lL_g", "R2_g")])
+
+#Takes a second to run bootstrapping (= 0.82)
+
+# g_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(g_fits, 5000)
+#   g_boots <- c(g_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qgamma, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# g_boot_r2 <- round(mean(g_boots),2)
+
+
+
+CI <- data.frame("x_ci" = seq(0, 7, 0.5), "y_ci" = seq(0, 7, 0.5))
+
+Gamma_fit_plot <- g_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qgamma, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[1])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", linewidth= 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Gamma")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)==0.82", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(2,6), ylim = c(-4, 8))+
+  theme(legend.position = "none")
+
+Gamma_fit_plot
+
+#ggsave("../output/QQ_Gamma.png", width = 3.5, height = 3.5)
+```
+
+```{r}
+samples_coal <- c("MD_RTLC_01", "MD_RTLC_02", "MD_RTLC_03", "MD_RTLC_04", "MD_RTLC_05", "MD_RTLC_06", "MD_RTLC_07", "MD_RTLC_08", "MD_RTLC_09", "MD_RTLC_10", "MD_RTLC_11", "MD_RTLC_13", "MD_RTLC_14", "MD_RTLC_17", "MD_RTLC_18", "MD_RTLC_19", "MD_RTLC_20", "MD_RTLC_21", "MD_RTLC_22", "MD_RTLC_23", "MD_RTLC_24", "MD_RTLC_25", "MD_RTLC_26", "MD_RTLC_27", "MD_RTLC_28", "MD_RTLC_29", "MD_RTLC_30", "MD_RTLC_31", "MD_RTLC_32", "MD_RTLC_33", "MD_RTLC_34", "MD_RTLC_35", "MD_RTLC_36", "MD_UL_01_A", "MD_UL_03_A", "MD_UL_12_A", "MD_UL_02_B", "MD_UL_05_B", "MD_UL_08_B", "MD_UL_11_B", "MD_UL_13_B", "MD_GSSF_T1_A", "MD_GSSF_T2_B", "MD_GSSF_T2_C", "MD_GSSF_T2_D", "MD_GSSF_T2_E", "MD_GSSF_T3_A", "MD_GSSF_T3_B", "MD_GSSF_T3_C", "MD_GSSF_T3_D", "MD_GSSF_T3_E", "MD_GSSF_T4_A", "MD_GSSF_T4_B", "MD_GSSF_T4_C", "MD_GSSF_T4_D", "MD_GSSF_T4_E", "MD_GSSF_T5_A", "MD_GSSF_T5_B", "MD_GSSF_T5_C", "MD_GSSF_T5_D", "MD_GSSF_T5_E", "MD_GSSF_T6_A", "MD_GSSF_T6_B", "MD_GSSF_T6_C", "MD_GSSF_T6_D", "MD_GSSF_T6_E", "MD_GSSF_T7_A", "MD_GSSF_T7_B", "MD_GSSF_T7_C", "MD_GSSF_T7_D", "MD_GSSF_T7_E", "MD_GSSF_T8_A", "MD_GSSF_T8_B", "MD_GSSF_T8_C",  "MD_GSSF_T8_D", "MD_GSSF_T8_E", "MD_GSSF_T9_A", "MD_GSSF_T9_B", "MD_GSSF_T9_C", "MD_GSSF_T9_D", "MD_GSSF_T9_E", "MD_GSSF_T10_B", "MD_GSSF_T10_C", "MD_GSSF_T10_D", "MD_GSSF_T10_E")
+```
+
+
+
+## Gaussian
+```{r}
+logn <- function(x, mean, sd){
+  (-0.5*log(2*pi*(sd^2)))+(-((x-mean)^2)/(2*sd^2))
+}
+tn <- function(x, mean, sd){
+  logn(x, mean, sd)-log(1-pnorm(0, mean, sd))
+}
+
+metn <- 1
+norm_fits <- data.frame("Sample" = NA, "RSG_ab" = NA, "qtruncnorm" = NA)
+norm_param <- data.frame("Sample" = NA, "mean" = NA, "sd" = NA, "AIC_n" = NA, "BIC_n" = NA, "lL_n" = NA, "R2_n" = NA)
+for(met1 in met_all){
+  met_sub <- met1
+  nll_n <- function(mean, sd) {
+    nll_val <- -sum(tn(x = met_sub[,"RSG_ab"], mean = mean, sd = sd))
+    if(mean < 500 | sd < 0 | mean/sd < 0.01){
+      nll_val <- nll_val * 1e100
+    }
+    nll_val
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_n,
+    start = list(mean = median(met_sub[,"RSG_ab"]), sd = 100),
+    method = "Nelder-Mead",
+  )
+# print(samples_all[metn])
+# print(summary(mle_fit))
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  qtruncnorm <- qtruncnorm(e_cdf, a = 0, b = Inf, mean = coef(mle_fit)[1], sd = coef(mle_fit)[2])
+  
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ ptruncnorm(met_sub[,"RSG_ab"], a = 0, b = Inf, coef(mle_fit)[1], coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])), met_sub, qtruncnorm)
+  norm_param <- rbind(norm_param, data.frame("Sample" = samples_all[metn], "mean" = coef(mle_fit)[1], "sd" = coef(mle_fit)[2], "AIC_n" = AIC(mle_fit), "BIC_n" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_n" = logLik(mle_fit), "R2_n" = R2))
+  colnames(fit) <- c("Sample", "RSG_ab", "qtruncnorm")
+  norm_fits <- rbind(norm_fits, fit)
+  
+  metn <- metn + 1
+}
+
+norm_fits <- norm_fits[-1,]
+norm_fits <- subset(norm_fits, norm_fits$qtruncnorm != "Inf")
+norm_param <- norm_param[-1,]
+
+met_samples <- cbind(met_samples, norm_param[,c("mean", "sd", "AIC_n", "BIC_n", "lL_n", "R2_n")])
+met_samples$mean <- ifelse(met_samples$Sample %in% samples_coal, met_samples$mean, NA)
+met_samples$sd <- ifelse(met_samples$Sample %in% samples_coal, met_samples$sd, NA)
+met_samples$AIC_n <- ifelse(met_samples$Sample %in% samples_coal, met_samples$AIC_n, NA)
+met_samples$BIC_n <- ifelse(met_samples$Sample %in% samples_coal, met_samples$BIC_n, NA)
+met_samples$lL_n <- ifelse(met_samples$Sample %in% samples_coal, met_samples$lL_n, NA)
+met_samples$R2_n <- ifelse(met_samples$Sample %in% samples_coal, met_samples$R2_n, NA)
+
+# Takes a second to run (= 0.51)
+
+# norm_fits <- subset(norm_fits, norm_fits$Sample %in% samples_coal)
+# 
+# n_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(norm_fits, 5000)
+#   n_boots <- c(n_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qtruncnorm, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# n_boot_r2 <- round(mean(n_boots),2)
+
+CI <- data.frame("x_ci" = seq(0, 7, 0.5), "y_ci" = seq(0, 7, 0.5))
+
+Norm_fit_plot <- norm_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qtruncnorm, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[2])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", size = 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Gaussian")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)==0.51", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(2,6), ylim = c(-4, 8))
+
+Norm_fit_plot
+#ggsave("../output/QQ_Gaussian.png", width = 3.5, height = 3.5)
+```
+
+#Lnorm - all data
+```{r}
+metn <- 1
+ln_fits <- data.frame("Sample" = NA, "Set" = NA, "RSG_ab" = NA, "qlnorm" = NA)
+ln_param <- data.frame("Sample" = NA, "meanlog" = NA, "sdlog" = NA, "AIC_ln" = NA,"BIC_ln" = NA, "lL_ln" = NA, "R2_ln" = NA)
+for(met1 in met_all){
+  
+  met_sub <- met1
+  nll_ln <- function(meanlog, sdlog) {
+    -sum(dlnorm((met_sub[,"RSG_ab"]), meanlog = meanlog, sdlog = sdlog, log = TRUE))
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_ln,
+    start = list(meanlog = 1, sdlog = median(met_sub[,"RSG_ab"])),
+    lower = c(0.001, 0.001),
+    upper = c(Inf, Inf),
+    method = "L-BFGS-B"
+  )
+  #print(samples_all[metn])
+  #print(summary(mle_fit))
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  qlnorm <- qlnorm(e_cdf, meanlog = coef(mle_fit)[1], sdlog = coef(mle_fit)[2])
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ plnorm(met_sub[,"RSG_ab"], coef(mle_fit)[1], coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])),rep(met_samples[metn, "Set"], length(met_sub[,"RSG_ab"])), met_sub, qlnorm)
+  ln_param <- rbind(ln_param, data.frame("Sample" = samples_all[metn], "meanlog" = coef(mle_fit)[1], "sdlog" = coef(mle_fit)[2], "AIC_ln" = AIC(mle_fit),"BIC_ln" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_ln" = logLik(mle_fit), "R2_ln" = R2))
+  colnames(fit) <- c("Sample", "Set", "RSG_ab", "qlnorm")
+  ln_fits <- rbind(ln_fits, fit)
+  
+  metn <- metn + 1
+}
+
+ln_fits <- ln_fits[-1,]
+ln_fits <- subset(ln_fits, ln_fits$qlnorm != "Inf")
+ln_param <- ln_param[-1,]
+
+met_samples <- cbind(met_samples, ln_param[,c("meanlog", "sdlog", "AIC_ln", "BIC_ln", "lL_ln", "R2_ln")])
+
+ln_fresh <- data.frame("Sample" = met_samples[,1], "Set" = met_samples[,2], "Matrix" = rep("Freshwater", 114))
+ln_cols <- c("meanlog", "sdlog", "AIC_ln", "BIC_ln", "lL_ln", "R2_ln", "top20")
+ln_fresh <- cbind(ln_fresh, met_samples[,ln_cols])
+saveRDS(ln_fresh, "../data/CrossEnv/ln_freshwater")
+
+# Takes a second to run (= 0.91)
+
+# ln_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(ln_fits, 5000)
+#   ln_boots <- c(ln_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qlnorm, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# ln_boot_r2 <- round(mean(ln_boots),2)
+
+CI <- data.frame("x_ci" = seq(0, 7, 0.5), "y_ci" = seq(0, 7, 0.5))
+
+Lnorm_fit_plot <- ln_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qlnorm, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[3])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", size = 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Lognormal")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)==0.91", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(2,6), ylim = c(-4, 8))
+
+Lnorm_fit_plot
+
+#ggsave("../output/QQ_Lnorm.png", width = 3.5, height = 3.5)
+```
+#Pareto - all data
+```{r}
+metn <- 1
+p_fits <- data.frame("Sample" = NA, "RSG_ab" = NA, "qpareto" = NA)
+p_param <- data.frame("Sample" = NA, "shape_p" = NA, "scale_p" = NA, "AIC_p" = NA, "BIC_p" = NA, "lL_p" = NA, "R2_p" = NA)
+for(met1 in met_all){
+  
+  met_sub <- met1
+  nll_p <- function(shape, scale) {
+    -sum(actuar::dpareto((met_sub[,"RSG_ab"]), shape = shape, scale = scale, log = TRUE))
+  }
+  mle_fit <- mle2(
+    minuslogl = nll_p,
+    start = list(shape = 1, scale = median(met_sub[,"RSG_ab"])),
+    lower = c(0.001, 0.001),
+    upper = c(Inf, Inf),
+    method = "L-BFGS-B"
+  )
+#  print(samples_all[metn])
+#  print(summary(mle_fit))
+  
+  e_cdf <- rank(met_sub[,"RSG_ab"])/length(met_sub[,"RSG_ab"])
+  
+  qpareto <- actuar::qpareto(e_cdf, shape = coef(mle_fit)[1], scale = coef(mle_fit)[2])
+  
+  fun_ecdf <- ecdf(met_sub[,"RSG_ab"])
+  R2 <- summary(lm(fun_ecdf(met_sub[,"RSG_ab"])~ actuar::ppareto(met_sub[,"RSG_ab"], coef(mle_fit)[1], coef(mle_fit)[2])))$r.squared
+
+  fit <- cbind(rep(samples_all[metn], length(met_sub[,"RSG_ab"])), met_sub, qpareto)
+  p_param <- rbind(p_param, data.frame("Sample" = samples_all[metn], "shape_p" = coef(mle_fit)[1], "scale_p" = coef(mle_fit)[2], "AIC_p" = AIC(mle_fit), "BIC_p" = 2*(log(length(met_sub[,"RSG_ab"]))) - 2*logLik(mle_fit), "lL_p" = logLik(mle_fit), "R2_p" = R2))
+  colnames(fit) <- c("Sample", "RSG_ab", "qpareto")
+  p_fits <- rbind(p_fits, fit)
+  
+  metn <- metn + 1
+}
+
+p_fits <- p_fits[-1,]
+p_fits <- subset(p_fits, p_fits$qpareto != "Inf")
+p_param <- p_param[-1,]
+met_samples <- cbind(met_samples, p_param[,c("shape_p", "scale_p", "AIC_p", "BIC_p", "lL_p", "R2_p")])
+
+#Takes a second to run (=0.8)
+
+# p_boots <- c()
+# x <- 0
+# while(x < 10000){
+#   fits <- sample_n(p_fits, 5000)
+#   p_boots <- c(p_boots, summary(lm(log(fits$RSG_ab,10) ~ log(fits$qpareto, 10)))$r.squared)
+#   x <- x + 1
+#   if(x%%100 == 0){
+#     print(x)
+#   }
+# }
+# 
+# p_boot_r2 <- round(mean(p_boots),2)
+
+CI <- data.frame("x_ci" = seq(0, 7, 0.5), "y_ci" = seq(0, 7, 0.5))
+
+Pareto_fit_plot <- p_fits %>% sample_n(10000) %>%
+  ggplot(aes(y = log(qpareto, 10), x = log(RSG_ab, 10)))+
+  geom_point(alpha = 0.03, pch = 4, color = cols[4])+
+  geom_ribbon(data = CI, aes(x = x_ci, y = y_ci, ymin = y_ci-1, ymax = y_ci+1), fill = alpha("black", 0.1))+
+  geom_abline(slope = 1, color = "black", size = 1, linetype = "dashed")+
+  ylab("Predicted values")+
+  xlab("Observed values")+
+  ggtitle("Pareto")+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force), breaks = c(-3,0,3,6))+
+  annotate("text", x = 2.5, y = 7, label = "italic(r[plain('m')]^2)=='0.80'", size = 5, parse = TRUE)+
+  coord_cartesian(xlim = c(2,6), ylim = c(-4, 8))+
+  theme(legend.position = "none")
+
+Pareto_fit_plot
+
+#ggsave("../output/QQ_Pareto.png", width = 3.5, height = 3.5)
+```
+## Combine qq-plots
+```{r}
+plot <- plot_grid(
+  Lnorm_fit_plot + theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  Gamma_fit_plot+ theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  Norm_fit_plot+ theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  Pareto_fit_plot+ theme(axis.title.x = element_blank(), axis.title.y = element_blank()),
+  nrow = 2,
+  align = 'vh',
+  rel_widths = c(1,1),
+  rel_heights = c(1,1)
+)
+
+x.axis <- plot_grid(
+  NULL,
+  get_plot_component(Lnorm_fit_plot, 'xlab-b'),
+  nrow = 1,
+  rel_widths = c(0.2,1)
+)
+
+qq_plots <- ggdraw(plot_grid(plot_grid(get_plot_component(Lnorm_fit_plot, 'ylab-l'), plot, nrow = 1, rel_widths = c(0.1,1)),x.axis, ncol = 1, rel_heights = c(1,0.1)))+
+    theme(plot.background = element_rect(fill= "white", color = NA))+
+    draw_plot_label(label = c("(c)", "(d)", "(e)", "(f)"), size = 20, x=c(0.07, 0.53, 0.07, 0.53), y = c(1, 1, 0.55, 0.55))
+
+qq_plots
+```
+## R2 values for Lognormal, Gamma, Gaussian, Pareto
+```{r}
+R2s <- met_samples[,c("Sample", "Set", "R2_g", "R2_ln","R2_p", "R2_n")]
+R2s <- gather(R2s, key = "dist", value = R2, R2_g:R2_n)
+
+R2s$dist <- factor(R2s$dist, levels = c("R2_ln", "R2_g", "R2_p", "R2_n"))
+
+fit <- aov(R2 ~ dist, data = subset(R2s, R2s$Set == "GSSF"))
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist))
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+fit <- aov(R2 ~ dist, data = subset(R2s, R2s$Set == "RTLC"))
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist))
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+fit <- aov(R2 ~ dist, data = subset(R2s, R2s$Set == "ULRG"))
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist))
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+
+R2s$dist <- factor(R2s$dist, levels = c("R2_ln", "R2_g", "R2_n", "R2_p"))
+
+R2_cld <- data.frame("Set" = c(rep("RTLC", 4), rep("ULRG", 4), rep("GSSF", 4)), "x" = rep(c(1,2,3,4), 3), "y" = rep(1.05, 12), "label" = c("a", "b", "c", "a", "a", "b", "c", "a", "a", "a", "a", "b"))
+
+R2_plot_RTLC <- ggplot()+
+  geom_boxplot(data = subset(R2s, R2s$Set == "RTLC"), aes(x = dist, y = R2, color = dist))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[2], cols[4]), labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 90,hjust = 1, vjust = 0.5, color = "black"), axis.ticks.x =  element_blank(), axis.title.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), legend.position = "bottom")+
+  ylim(c(0.2, 1.05))+
+  ylab(expression(italic('r'^2)))+
+  ggtitle("Continuous culture")+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  geom_text(data = subset(R2_cld, R2_cld$Set == "RTLC"), aes(x = x, y = y, label = label))
+
+R2_plot_RTLC
+
+R2_plot_ULRG <- ggplot()+
+  geom_boxplot(data = subset(R2s, R2s$Set == "ULRG"), aes(x = dist, y = R2, color = dist))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[2], cols[4]), labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  ylab(expression(italic('r'^2)))+
+  ylim(c(0.2, 1.05))+
+  ggtitle("Environmental samples")+
+  geom_text(data = subset(R2_cld, R2_cld$Set == "ULRG"), aes(x = x, y = y, label = label))+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  theme(legend.position = "bottom", legend.title = element_blank(), axis.title.x = element_blank(), axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, color = "black"), axis.ticks.x =  element_blank(), plot.title = element_text(hjust = 0.5, size = 16))
+
+R2_plot_ULRG
+
+R2_plot_GSSF <- ggplot()+
+  geom_boxplot(data = subset(R2s, R2s$Set == "GSSF"), aes(x = dist, y = R2, color = dist))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[2], cols[4]), labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 90,hjust = 1, vjust = 0.5,  color = "black"), axis.ticks.x =  element_blank(), axis.title.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), legend.position = "bottom")+
+  ylab(expression(italic('r'^2)))+
+  ggtitle("Batch culture")+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  ylim(c(0.2, 1.05))+
+  geom_text(data = subset(R2_cld, R2_cld$Set == "GSSF"), aes(x = x, y = y, label = label))
+
+R2_plot_GSSF
+```
+
+## KS values for Lognormal, Gamma, Gaussian, Pareto
+```{r}
+KSs <- data.frame("Sample" = NA, "Set" = NA, "ks_g" = NA, "ks_p" = NA, "ks_ln" = NA, "ks_n" = NA)
+
+norm_param_clean <- norm_param
+norm_param_clean$mean <- ifelse(norm_param$Sample %in% samples_coal, norm_param$mean, NA)
+norm_param_clean$sd <- ifelse(norm_param$Sample %in% samples_coal, norm_param$sd, NA)
+
+metn <- 1
+for(met in met_all){
+  ks_g <- ks.test(met[,"RSG_ab"], "pgamma", shape = g_param[metn, "shape"], scale = g_param[metn, "scale"])$statistic
+  ks_ln <- ks.test(met[,"RSG_ab"], "plnorm", meanlog = ln_param[metn, "meanlog"], sdlog = ln_param[metn, "sdlog"])$statistic
+  ks_n <- ks.test(met[,"RSG_ab"], "ptruncnorm", a = 0, b = Inf, mean = norm_param_clean[metn, "mean"], sd = norm_param_clean[metn, "sd"])$statistic
+  ks_p <- ks.test(met[,"RSG_ab"], "ppareto", shape = p_param[metn, "shape_p"], scale = p_param[metn, "scale_p"])$statistic
+  KSs <- rbind(KSs, c("Sample" = samples_all[metn], "Set" = as.character(met_samples[metn, "Set"]), "ks_g" = ks_g, "ks_p" = ks_p, "ks_ln" = ks_ln, "ks_n" = ks_n))
+  metn <- metn + 1
+}
+
+KSs <- KSs[-1,]
+KSs <- gather(KSs, key = "dist", value = "KS", ks_g:ks_n)
+KSs$KS <- as.numeric(KSs$KS)
+KSs$dist <- factor(KSs$dist, levels = c("ks_ln", "ks_g", "ks_n", "ks_p"))
+KSs <- subset(KSs, !is.na(KSs$KS))
+str(KSs)
+
+
+fit <- aov(KS ~ dist, data = subset(KSs, KSs$Set == "GSSF"))
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist), adjust = "Tukey")
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+fit <- aov(KS ~ dist, data = subset(KSs, KSs$Set == "RTLC"))
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist))
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+fit <- aov(KS ~ dist, data = subset(KSs, KSs$Set == "ULRG"))
+summary(fit)
+emmeans(fit, ~ dist)
+pairs(emmeans(fit, ~ dist))
+test <- TukeyHSD(fit)
+multcompLetters4(fit, test)
+
+KSs$dist <- factor(KSs$dist, levels = c("ks_ln", "ks_g", "ks_n", "ks_p"))
+KS_cld <- data.frame("Set" = c(rep("GSSF", 4), rep("RTLC", 4), rep("ULRG", 4)), "x" = rep(c(1,2,3,4), 3), "y" = rep(c(0.95), 12), "label" = c("b", "b", "b", "a", "c", "b", "a", "c", "d", "c", "a", "b"))
+
+KS_plot_RTLC <- ggplot()+
+  geom_boxplot(data = subset(KSs, KSs$Set == "RTLC"), aes(x = dist, y = KS, color = dist))+
+  ylim(c(0, 1))+
+  ylab("K-S statistic")+
+  geom_text(data = subset(KS_cld, KS_cld$Set == "RTLC"), aes(x = x, y = y, label = label))+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[2], cols[4]), labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5,color = "black"), axis.ticks.x =  element_blank(), axis.title.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), legend.position = "bottom")+
+  ggtitle("Continuous culture")
+
+KS_plot_RTLC
+
+KS_plot_ULRG <- ggplot()+
+  geom_boxplot(data = subset(KSs, KSs$Set == "ULRG"), aes(x = dist, y = KS, color = dist))+
+  ylim(c(0, 1))+
+  ylab("K-S statistic")+
+  geom_text(data = subset(KS_cld, KS_cld$Set == "ULRG"), aes(x = x, y = y, label = label))+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[2], cols[4]), labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5,color = "black"), axis.ticks.x =  element_blank(), axis.title.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), legend.position = "bottom")+
+  ggtitle("Environmental samples")
+
+KS_plot_ULRG
+
+KS_plot_GSSF <- ggplot()+
+  geom_boxplot(data = subset(KSs, KSs$Set == "GSSF"), aes(x = dist, y = KS, color = dist))+
+  ggtitle("Batch culture")+
+  scale_x_discrete(labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  scale_color_manual(values = c(cols[3], cols[1], cols[2], cols[4]), labels = c("Lognormal", "Gamma", "Gaussian", "Pareto"))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, color = "black"), axis.ticks.x =  element_blank(), axis.title.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 16), legend.position = "bottom")+
+  ylim(c(0, 1))+
+  ylab("K-S statistic")+
+  geom_text(data = subset(KS_cld, KS_cld$Set == "GSSF"), aes(x = x, y = y, label = label))
+
+KS_plot_GSSF
+```
+
+## Determine best model via AICs & BICs
+```{r}
+AICs <- met_samples[,c("Sample", "Set", "AIC_g", "AIC_ln", "AIC_p", "AIC_n")]
+AICs <- gather(AICs, key = "dist", value = "AIC", AIC_g:AIC_n)
+
+AIC_min <- AICs[ AICs$AIC == ave(AICs$AIC, AICs$Sample, FUN=function(x) min(x, na.rm= TRUE)), ]
+
+for(x in unique(AICs$Set)){
+  print(x)
+  AIC_g <- subset(AIC_min, AIC_min$dist == "AIC_g" & AIC_min$Set == x)$Sample
+  print(paste("Gamma:", nrow(subset(AIC_min, AIC_min$dist == "AIC_g" & AIC_min$Set == x))))
+  AIC_ln <- subset(AIC_min, AIC_min$dist == "AIC_ln" & AIC_min$Set == x)$Sample
+  print(paste("Lognormal: ", nrow(subset(AIC_min, AIC_min$dist == "AIC_ln"& AIC_min$Set == x))))
+  AIC_p <- subset(AIC_min, AIC_min$dist == "AIC_p" & AIC_min$Set == x)$Sample
+  print(paste("Pareto: ", nrow(subset(AIC_min, AIC_min$dist == "AIC_p"& AIC_min$Set == x))))
+  AIC_n <- subset(AIC_min, AIC_min$dist == "AIC_n" & AIC_min$Set == x)$Sample
+  print(paste("Gaussian: ", nrow(subset(AIC_min, AIC_min$dist == "AIC_n"& AIC_min$Set == x))))
+}
+
+BICs <- met_samples[,c("Sample", "Set", "BIC_g", "BIC_ln", "BIC_p", "BIC_n")]
+BICs <- gather(BICs, key = "dist", value = "BIC", BIC_g:BIC_n)
+
+BIC_min <- BICs[ BICs$BIC == ave(BICs$BIC, BICs$Sample, FUN=function(x) min(x, na.rm= TRUE)), ]
+
+for(x in unique(BICs$Set)){
+  print(x)
+  BIC_g <- subset(BIC_min, BIC_min$dist == "BIC_g" & BIC_min$Set == x)$Sample
+  print(paste("Gamma:", nrow(subset(BIC_min, BIC_min$dist == "BIC_g" & BIC_min$Set == x))))
+  BIC_ln <- subset(BIC_min, BIC_min$dist == "BIC_ln" & BIC_min$Set == x)$Sample
+  print(paste("Lognormal: ", nrow(subset(BIC_min, BIC_min$dist == "BIC_ln"& BIC_min$Set == x))))
+  BIC_p <- subset(BIC_min, BIC_min$dist == "BIC_p" & BIC_min$Set == x)$Sample
+  print(paste("Pareto: ", nrow(subset(BIC_min, BIC_min$dist == "BIC_p"& BIC_min$Set == x))))
+  BIC_n <- subset(BIC_min, BIC_min$dist == "BIC_n" & BIC_min$Set == x)$Sample
+  print(paste("Gaussian: ", nrow(subset(BIC_min, BIC_min$dist == "BIC_n"& BIC_min$Set == x))))
+}
+```
+
+## Draw Figure
+```{r}
+plot <- plot_grid(
+  plot_grid(get_plot_component(R2_plot_GSSF, 'ylab-l'), NULL, ncol = 1, rel_heights = c(1,0.05)),
+  R2_plot_GSSF + theme(axis.title.y = element_blank(), axis.text.x = element_blank()) + guides(color = "none"),
+  R2_plot_RTLC + theme(axis.title.y = element_blank(), axis.text.x = element_blank()) + guides(color = "none"),
+  R2_plot_ULRG + theme(axis.title.y = element_blank(), axis.text.x = element_blank()) + guides(color = "none"),
+  plot_grid(get_plot_component(KS_plot_GSSF, 'ylab-l'), NULL, ncol = 1, rel_heights = c(1,0.3)),
+  KS_plot_GSSF + theme(axis.title.y = element_blank(), plot.title = element_blank()) + guides(color = "none"),
+  KS_plot_RTLC + theme(axis.title.y = element_blank(), plot.title = element_blank()) + guides(color = "none"),
+  KS_plot_ULRG + theme(axis.title.y = element_blank(), plot.title = element_blank()) + guides(color = "none"),
+  nrow = 2,
+  rel_widths = c(0.15,1,1,1),
+  rel_heights = c(0.45, 0.55))
+
+plot
+
+
+R2_KS <- ggdraw()+
+  draw_plot(plot)+
+  theme(plot.background = element_rect(fill= "white", color = NA))+
+    draw_plot_label(label = c("(a)", "(b)"), size = 20, x=c(0, 0), y = c(1, 0.58))
+
+R2_KS
+
+ggdraw(plot_grid(R2_KS, NULL, plot_grid(NULL, qq_plots, NULL, nrow = 1, rel_widths = c(0.05, 0.9, 0.05)), ncol = 1, rel_heights = c(0.5, 0.01, 0.5)))+
+    theme(plot.background = element_rect(fill= "white", color = NA))+
+  draw_plot_label(label = c("Batch: 24/50", "Batch: 7/50", "Batch: 2/50", "Batch: 17/50"), x = c(0.35, 0.35, 0.76, 0.76), y = c(0.14, 0.365, 0.14, 0.365), fontface = "plain", hjust = 0, size = 14)+
+  draw_plot_label(label = c("Continuous: 0/28", "Continuous: 28/28", "Continuous: 0/28", "Continuous: 0/28"), x = c(0.35, 0.35, 0.76, 0.76), y = c(0.125, 0.35, 0.125, 0.35), fontface = "plain", hjust = 0, size = 14)+
+  draw_plot_label(label = c("Environmental: 0/36", "Environmental: 36/36", "Environmental: 0/36", "Environmental: 0/36"),x = c(0.35, 0.35, 0.76, 0.76), y = c(0.11, 0.335, 0.11, 0.335), fontface = "plain", hjust = 0, size = 14)
+
+ggsave("../output/Fig4_Freshwaterfits.png", width = 11, height = 15)
+```
+
+#FIGURE 5. Productivity
+```{r}
+met_samples$DummySet <- (met_samples$Set == "ULRG")*1
+
+#fit <- lm(sdlog ~ log(uMChr,10) + DummySet + log(uMChr,10)*DummySet, data = subset(met_samples, met_samples$Set %in% c("ULRG", "RTLC")))
+
+#No signficant interaction between BP and Set
+fit <- lm(sdlog ~ log(uMChr,10) + DummySet, data = subset(met_samples, met_samples$Set %in% c("ULRG", "RTLC")))
+
+summary(fit)
+AIC(fit)
+
+rsq.partial(fit)
+
+RTLC.int <- fit$coefficients[1]
+RTLC.slp <- fit$coefficients[2]
+ULRG.int <- RTLC.int + fit$coefficients[3]
+ULRG.slp <- RTLC.slp + fit$coefficients[4]
+
+mean(summary(fit)$coefficient[,4])
+
+BP_sdlog <- ggplot()+
+  geom_smooth(data = subset(met_samples, met_samples$Set %in% c("ULRG", "RTLC")), aes(x = log(uMChr, 10), y = sdlog, color = Set, group = Set, fill = Set), method = "lm", formula = y~x, cex = 1.25, fill = "#333333", alpha = 0.35)+
+  geom_point(data = subset(met_samples, met_samples$Set %in% c("ULRG", "RTLC")), aes(x = log(uMChr, 10), y = sdlog, color = Set, group = Set, fill = Set), size = 1.5)+
+  geom_point(data = subset(met_samples, met_samples$Sample == "MD_UL_14_A"), aes(x = log(uMChr, 10), y = sdlog), size = 4,  fill = cols[7], shape = 23, stroke = 0.75)+
+  geom_point(data = subset(met_samples, met_samples$Sample == "MD_RTLC_09"), aes(x = log(uMChr, 10), y = sdlog), size = 4,  fill = cols[5], shape = 23, stroke = 0.75)+
+  ylab(expression(paste("Skewness of activity (", sigma, ")")))+
+  xlab(expression(paste("Productivity (", mu, "M C/h)")))+
+  annotate("text", x = -1.4, y = 2.1, label = paste("italic(R^2) ==", round(summary(fit)$r.squared, 2)), size = 4, parse = TRUE)+
+  annotate("text", x = -1.37, y = 2.02, label = "italic(P)~\"< 0.0001\"", parse = TRUE, size = 4)+
+  scale_x_continuous(labels = label_math(10^.x))+
+  scale_color_manual(labels = c("Continuous culture", "Environmental samples"), values = c(cols[7], cols[5]))+
+  scale_fill_manual(labels = c("Continuous culture", "Environmental samples"), values = c(cols[7], cols[5]))+
+  coord_cartesian(ylim= c(0.65, 2.1), xlim = c(-3.5, -1.15), clip = "off")+
+  theme(legend.position = "bottom", legend.title = element_blank())+
+  guides(color = "none", fill = guide_legend(override.aes = list(shape = 22, size = 4)))
+
+BP_sdlog
+
+sdlow_hist <- hist(log(MD_ULRG_14_A[,"RSG_ab"], 10), freq = FALSE, breaks = seq(2.5,7, by =0.05))
+sdlow <- data.frame("breaks" = sdlow_hist$breaks[-1]-0.025, "density" = sdlow_hist$density)
+sdlow_fit_hist <-dlnorm(10^seq(2.5,7, by = 0.05), meanlog = met_samples[50, "meanlog"], sdlog = met_samples[50, "sdlog"])
+sdlow_fit <- data.frame("breaks" = seq(2.5,7, by = 0.05)-0.025, "density" = sdlow_fit_hist)
+sdlow_fit$transformed <- sdlow_fit$density * (10^(sdlow_fit$breaks + 0.025)) * log(10)
+
+max(log(MD_RTLC_09_RSG[,"RSG_ab"], 10))
+sdhigh_hist <- hist(log(MD_RTLC_09_RSG[,"RSG_ab"], 10),breaks = seq(2.5,7, by = 0.05))
+sdhigh <- data.frame("breaks" = sdhigh_hist$breaks[-1]-0.025, "density" = sdhigh_hist$density)
+sdhigh_fit_hist <-dlnorm(10^seq(2.5,7, by = 0.05), meanlog = met_samples[9, "meanlog"], sdlog = met_samples[9, "sdlog"])
+sdhigh_fit <- data.frame("breaks" = seq(2.5,7, by = 0.05)-0.025, "density" = sdhigh_fit_hist)
+sdhigh_fit$transformed <- sdhigh_fit$density * (10^(sdhigh_fit$breaks + 0.025)) * log(10)
+
+
+sdlog_comp_plot <- ggplot()+
+  geom_bar(data = sdhigh, aes(x = breaks, y = density), stat = "identity", fill = alpha(cols[5], 0.5), width = 0.05)+
+  geom_bar(data = sdlow, aes(x = breaks, y = density), stat = "identity", fill= alpha(cols[7], 0.5), width = 0.05)+
+  scale_x_continuous(labels = label_math(10^.x), breaks = c(3,4,5,6))+
+  coord_cartesian(xlim = c(2.5, 6), ylim = c(0,1.5), clip = "off")+
+  annotate("text", x = 2.8, y = 0.92, label = "sigma == 1.79", parse = TRUE, size = 5, color = cols[5])+
+  annotate("text", x = 4, y = 1.37, label = "sigma == 0.81", parse = TRUE, size = 5, color = cols[7])+
+  xlab("Metabolic activity")+
+  ylab("Density")
+
+sdlog_comp_plot
+
+ggdraw()+
+  draw_plot(BP_sdlog + guides(fill = "none"), x = 0, y = 0, width = 0.5, height = 1)+
+  draw_plot(sdlog_comp_plot, x = 0.5, y = 0, width = 0.5, height = 1)+
+  theme(plot.background = element_rect(fill= "white", color = NA))+
+  draw_plot_label(label = c("(a)", "(b)"), size = 20, x=c(0, 0.5), y = c(1, 1))
+
+ggsave("../output/Fig5_BP_skew.png", width = 12, height = 6)
+```
+# FIGURE S1. Phase Top 20%
+```{r}
+ggplot(subset(met_samples, met_samples$Set == "GSSF"), aes(x = Phase, y = top20))+
+  geom_violin(aes(group = Phase))+
+  geom_jitter(color = cols[6])+
+  scale_x_discrete(labels = c("Lag", "Exponential", "Stationary"))+
+  ylab(expression(paste("Proportion of activity by top cells")))+
+  xlab("Phase of growth")+
+  guides(color = "none")
+
+ggsave("../output/FigS1_Phase_top20.png", width = 5, height = 5)
+```
+
+# FIGURE S2. Biomass Top 20%
+```{r}
+top20_gam <- gam(top20 ~ s(OD600), family = gaussian(link="identity"), data = subset(met_samples, met_samples$Set == "GSSF"), method = "REML")
+summary(top20_gam)
+
+Top20_plot <- predict_gam(top20_gam) %>%
+  ggplot(aes(OD600, fit))+
+  geom_smooth_ci(color = cols[4], cex = 1.25, ci_alpha = 0.35, alpha = 0.3)+
+  geom_point(data = subset(met_samples, met_samples$Set == "GSSF"), aes(x = OD600, y = top20, color = Phase), size = 1.5)+
+  scale_y_continuous(labels= scales::percent, breaks = c(0.2, 0.4, 0.6, 0.8, 1), limits = c(0.2,1))+
+  scale_color_manual(values = c(cols[5], cols[6], cols[7]), labels = c("Lag", "Exponential", "Stationary"), name = "Growth phase")+
+  ylab(expression(paste("Proportion of activity by top cells")))+
+  xlab(parse(text = "Biomass~(OD[600])"))+
+  labs(title = bquote("Deviance explained =" ~ .(signif(summary(top20_gam)$dev, 2))))+
+  theme(legend.text = element_text(size = 10), legend.title = element_text(size = 13), legend.position = "bottom")
+
+Top20_plot
+
+ggsave("../output/FigS2_Top20_biomass.png", width = 8, height = 6)
+```
+
+# FIGURE S3. Growth Curve AICs
+```{r}
+GSSF_GC_Goodman <- subset(GSSF_GC, GSSF_GC$Lake == "Goodman" & GSSF_GC$Minutes < 3000)
+GSSF_GC_Goodman$Sample <- c("MD_GSSF_T0_A", "MD_GSSF_T0_B", "MD_GSSF_T0_C", "MD_GSSF_T0_D", "MD_GSSF_T0_E","MD_GSSF_T1_A", "MD_GSSF_T1_B", "MD_GSSF_T1_C", "MD_GSSF_T1_D", "MD_GSSF_T1_E", "MD_GSSF_T1.5_A", "MD_GSSF_T1.5_B", "MD_GSSF_T1.5_C", "MD_GSSF_T1.5_D", "MD_GSSF_T1.5_E", "MD_GSSF_T2_A", "MD_GSSF_T2_B", "MD_GSSF_T2_C", "MD_GSSF_T2_D", "MD_GSSF_T2_E", "MD_GSSF_T3_A", "MD_GSSF_T3_B", "MD_GSSF_T3_C", "MD_GSSF_T3_D", "MD_GSSF_T3_E", "MD_GSSF_T4_A", "MD_GSSF_T4_B", "MD_GSSF_T4_C", "MD_GSSF_T4_D", "MD_GSSF_T4_E", "MD_GSSF_T5_A", "MD_GSSF_T5_B", "MD_GSSF_T5_C", "MD_GSSF_T5_D", "MD_GSSF_T5_E", "MD_GSSF_T6_A", "MD_GSSF_T6_B", "MD_GSSF_T6_C", "MD_GSSF_T6_D", "MD_GSSF_T6_E", "MD_GSSF_T7_A", "MD_GSSF_T7_B", "MD_GSSF_T7_C", "MD_GSSF_T7_D", "MD_GSSF_T7_E", "MD_GSSF_T8_A", "MD_GSSF_T8_B","MD_GSSF_T8_C", "MD_GSSF_T8_D", "MD_GSSF_T8_E", "MD_GSSF_T9_A", "MD_GSSF_T9_B", "MD_GSSF_T9_C", "MD_GSSF_T9_D", "MD_GSSF_T9_E")
+
+GSSF_GC_AIC <- ggplot(data = predict_OD600, aes(x = x, y = y))+
+  geom_line(cex = 1.25, color = alpha("grey30", 0.4))+
+  geom_point(data = GSSF_GC_Goodman, aes(x = Minutes, y = OD600), color = "black", cex = 2)+
+  geom_point(data = subset(GSSF_GC_Goodman, GSSF_GC_Goodman$Sample %in% AIC_g), aes(x = Minutes, y = OD600, color = "B"), cex = 2)+
+  geom_point(data = subset(GSSF_GC_Goodman, GSSF_GC_Goodman$Sample %in% AIC_ln), aes(x = Minutes, y = OD600, color = "A"), cex = 2)+
+  geom_point(data = subset(GSSF_GC_Goodman, GSSF_GC_Goodman$Sample %in% AIC_n), aes(x = Minutes, y = OD600, color = "C"), cex = 2)+
+  geom_point(data = subset(GSSF_GC_Goodman, GSSF_GC_Goodman$Sample %in% AIC_p), aes(x = Minutes, y = OD600, color = "D"), cex = 2)+
+  ylab(parse(text = "Biomass~(OD[600])"))+
+  xlab("Time (min)")+
+  scale_color_manual(name = "AIC & BIC best fit", labels= c("Lognormal", "Gamma", "Gaussian", "Pareto"), values = c(cols[3], cols[1], cols[2], cols[4]))+
+  theme(legend.title = element_text(size = 15))
+
+GSSF_GC_AIC
+
+ggsave("../output/FigS3_GC_AICs.png", width = 8, height = 5)
+```
+
+# FIGURE S6 + S7. BP vs. Dist + Growth rate
+```{r}
+summary(lm(uMChr ~ Dist_dam, data = met_samples))
+summary(lm(uMChr ~ poly(Dist_dam,2), data = subset(met_samples, met_samples$Set == "ULRG")))
+
+BP_dist_gam <- gam(log(uMChr, 10) ~ s(Dist_dam), sp = c(0.05), family = gaussian(link="identity"), data = met_samples, method = "REML")
+summary(BP_dist_gam)
+
+BP_dist_plot <- predict_gam(BP_dist_gam) %>%
+  ggplot(aes(Dist_dam, fit))+
+  geom_smooth_ci(color = cols[4], cex = 1.25, ci_alpha = 0.35, alpha = 0.3)+
+  geom_point(data = met_samples, aes(x = Dist_dam, y = log(uMChr, 10)), size = 1.5)+
+  ylab(expression(paste("Bacterial production (", mu, "M C/hr)")))+
+  xlab("Distance from dam (m)")+
+  labs(title = bquote("Deviance explained =" ~ .(signif(summary(BP_dist_gam)$dev, 2))))+
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force))+
+  theme(legend.text = element_text(size = 10), legend.title = element_text(size = 13), legend.position = "bottom")
+
+BP_dist_plot
+
+ggsave("../output/FigS6_Dam_BP.png", width = 5, height = 4)
+
+met_samples$DF <- log(1/(10^met_samples$Tau), 10)
+BP_DF_gam <- gam(log(uMChr, 10) ~ s(DF), family = gaussian(link = "identity"), data = met_samples, method = "REML")
+summary(BP_DF_gam)
+
+BP_DF_plot <- predict_gam(BP_DF_gam) %>%
+  ggplot(aes(DF, fit))+
+  geom_smooth_ci(color = cols[4], cex = 1.25, ci_alpha = 0.35, alpha = 0.3)+
+  geom_point(data = met_samples, aes(x = DF, y = log(uMChr,10)), size = 1.5)+
+  ylab(expression(paste("Bacterial production (", mu, "M C/hr)")))+
+  xlab(expression(paste("Growth rate (Dilution factor, 1/", tau, ", ", h^-1, ")")))+
+  labs(title = bquote("Deviance explained =" ~ .(signif(summary(BP_DF_gam)$dev, 2))))+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+  
+  scale_y_continuous(labels = label_math(expr = 10^.x, format = force))+
+  theme(legend.text = element_text(size = 10), legend.title = element_text(size = 13), legend.position = "bottom")
+
+BP_DF_plot
+
+ggsave("../output/FigS7_DF_BP.png", width = 5, height = 4)
+
+```
+
+# FIGURE S8. DF vs sdlog
+```{r}
+DF_sdlog_gam <- gam(sdlog ~ s(DF), family = gaussian(link = "identity"), data = subset(met_samples, met_samples$Set == "RTLC"), method = "REML")
+summary(DF_sdlog_gam)
+
+mean(summary(DF_sdlog_gam)$s.table[,4])
+
+
+RTLC_DF_sdlog <- predict_gam(DF_sdlog_gam) %>%
+  ggplot(aes(DF, fit))+
+  geom_smooth_ci(color = cols[3], cex = 1.25, ci_alpha = 0.35)+
+  geom_point(data = subset(met_samples, met_samples$Set == "RTLC"), aes(x = DF, y = sdlog), size = 1.5)+  
+  xlab(expression(paste("Growth rate (Dilution factor, 1/", tau, ", ", h^-1, ")")))+
+  ylab(expression(atop("Skewness of activity", paste("(lognormal ", sigma, ")"))))+
+  scale_x_continuous(labels = label_math(expr = 10^.x, format = force))+
+  labs(title = bquote("Deviance explained =" ~ .(signif(summary(DF_sdlog_gam)$dev, 2))))
+
+RTLC_DF_sdlog
+
+ggsave("../output/FigS8_RTLC_DF_sdlog.png")
+```
